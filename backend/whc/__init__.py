@@ -30,7 +30,7 @@ def create_app(config=None):
         DATA_DIR=str(data_dir), UPLOAD_DIR=os.environ.get("UPLOAD_DIR", str(data_dir / "uploads")),
         BACKUP_DIR=os.environ.get("BACKUP_DIR", str(data_dir / "backups")),
         DATABASE_URL=os.environ.get("DATABASE_URL", "sqlite:///" + str(data_dir / "hoardcounter.db").replace("\\", "/")),
-        SECRET_KEY=os.environ.get("SECRET_KEY"), COOKIE_SECURE=os.environ.get("COOKIE_SECURE", "true").lower() == "true",
+        SECRET_KEY=os.environ.get("SECRET_KEY"), COOKIE_SECURE=os.environ.get("COOKIE_SECURE", "false").lower() == "true",
         HOUSEHOLD_TIMEZONE=os.environ.get("HOUSEHOLD_TIMEZONE", "America/New_York"),
         MAX_CONTENT_LENGTH=100 * 1024 * 1024,
         SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax", PERMANENT_SESSION_LIFETIME=timedelta(hours=12),

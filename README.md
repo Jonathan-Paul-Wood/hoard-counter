@@ -1,6 +1,6 @@
 # Hoard Counter
 
-A private household ledger for budgeting, spending, subscriptions, investment planning, and financial reports. Next.js/React/TypeScript frontend, Flask backend, and SQLite storage. Designed for a Linux Docker host reached over Tailscale.
+A private household ledger for budgeting, spending, subscriptions, investment planning, and financial reports. Next.js/React/TypeScript frontend, Flask backend, and SQLite storage. Runs with Docker Compose and is accessible locally without Tailscale or another external service.
 
 ## What is included
 
@@ -13,17 +13,20 @@ A private household ledger for budgeting, spending, subscriptions, investment pl
 
 ## Run on Linux
 
-See [the operations guide](docs/operations.md) for first installation, private HTTPS, scheduled backups, releases, and recovery. Docker images never contain the household database or uploads.
+Docker Engine and Docker Compose v2 are sufficient to build and run the application. See [the operations guide](docs/operations.md) for optional remote access, scheduled backups, releases, and recovery. Docker images never contain the household database or uploads.
 
 ```sh
 cp .env.example .env
-python3 -c 'import secrets; print(secrets.token_hex(32))'
+docker run --rm python:3.12-slim python -c 'import secrets; print(secrets.token_hex(32))'
 # Set SECRET_KEY in .env to the generated value.
-sudo python3 scripts/manage.py deploy --version 1.0.0
-sudo tailscale serve --bg http://127.0.0.1:8080
+docker compose up --build -d --wait
 ```
 
-Open the private HTTPS address and create the first administrator. Start by adding financial accounts and opening balances. Built-in Income and Expenses counterparties are provided; add named payees and income sources as needed. For non-USD accounts, enter exchange rates before transactions or nonzero opening balances.
+Open [http://localhost:8080](http://localhost:8080) and create the first administrator. The one-shot `init` container prepares persistent storage and the initial database before the API starts. No host Python, Node.js, or VPN is needed. Start by adding financial accounts and opening balances. Built-in Income and Expenses counterparties are provided; add named payees and income sources as needed. For non-USD accounts, enter exchange rates before transactions or nonzero opening balances.
+
+The default binding is local-only. Configure `BIND_ADDRESS` and `HTTP_PORT` in `.env` for another interface or port. Keep `COOKIE_SECURE=false` for direct HTTP; set it to `true` when using an optional HTTPS reverse proxy. Tailscale may provide host-level remote access, but is not part of the application. Existing `.env` files keep their values: change a previous `COOKIE_SECURE=true` to `false` before switching to local HTTP.
+
+Use the [managed upgrade procedure](docs/operations.md#releases-and-rollback) for new releases so migrations have a verified backup and rollback path. Plain Compose startup refuses to migrate an existing installation to a different release.
 
 ## Local development
 
@@ -53,7 +56,7 @@ pnpm install --frozen-lockfile
 pnpm dev
 ```
 
-Open `http://127.0.0.1:3000`. The development frontend forwards API requests to Flask. Financial state stays in the directories above across frontend/backend restarts. `COOKIE_SECURE=false` is only for local HTTP development; production uses HTTPS and secure cookies.
+Open `http://127.0.0.1:3000`. The development frontend forwards API requests to Flask. Financial state stays in the directories above across frontend/backend restarts. The cookie setting follows the access protocol: `COOKIE_SECURE=false` for HTTP, `true` for HTTPS.
 
 ## Validation and API
 

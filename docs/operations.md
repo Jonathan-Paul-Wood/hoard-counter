@@ -1,29 +1,28 @@
 # Linux operations
 
-Hoard Counter runs as three non-root Docker Compose services: Next.js, Flask/Gunicorn, and an nginx proxy. Only `127.0.0.1:8080` is published on the host. Tailscale Serve provides the private HTTPS entry point. The SQLite database and uploads live outside the source checkout and container images.
+Hoard Counter runs as three non-root Docker Compose services: Next.js, Flask/Gunicorn, and an nginx proxy. A one-shot initialization container prepares storage before startup. The default entry point is `http://localhost:8080`, published on `127.0.0.1:8080`. No VPN or external proxy is required. The SQLite database and uploads live outside the source checkout and container images.
 
 ## First installation
 
-Requirements: a Linux machine with Docker Engine and Compose v2 supporting `up --wait`, Python 3.11 or later, cron, and Tailscale already connected. Use a local filesystem for SQLite, not an NFS/SMB-mounted directory. These commands assume the checkout is `/opt/hoard-counter`.
+Runtime requirements: a Linux machine with Docker Engine and Compose v2 supporting `up --wait`. Host Python and Node.js are not required for Docker startup. Python 3.11+ is used only by the optional host deployment/restore manager, and cron by scheduled backups. Use a local filesystem for SQLite, not an NFS/SMB-mounted directory. These commands assume the checkout is `/opt/hoard-counter`.
 
 ```sh
 cd /opt/hoard-counter
 cp .env.example .env
-python3 -c 'import secrets; print(secrets.token_hex(32))'
+docker run --rm python:3.12-slim python -c 'import secrets; print(secrets.token_hex(32))'
 ```
 
-Put the generated value in `.env` as `SECRET_KEY`, set `HOUSEHOLD_TIMEZONE`, and retain `COOKIE_SECURE=true` for HTTPS. Use simple `KEY=value` configuration lines; deployment tools do not execute the file as shell code. Keep this secret stable between releases and retain a separate protected copy of `.env` for machine recovery. The backup archives do not contain secrets.
+Put the generated value in `.env` as `SECRET_KEY`, set `HOUSEHOLD_TIMEZONE`, and retain `COOKIE_SECURE=false` for default local HTTP access. Use simple `KEY=value` configuration lines; deployment tools do not execute the file as shell code. Keep this secret stable between releases and retain a separate protected copy of `.env` for machine recovery. The backup archives do not contain secrets.
 
 ```sh
 chmod 600 .env
-sudo python3 scripts/manage.py deploy --version 1.0.0
-sudo tailscale serve --bg http://127.0.0.1:8080
-sudo python3 scripts/manage.py status
+docker compose up --build -d --wait
+docker compose ps --all
 ```
 
-Open the HTTPS address printed by Tailscale and complete the first-user setup. Restrict tailnet access to the household members who should reach this machine. Serve provides tailnet-only HTTPS; do not enable Funnel for this deployment.
+Open `http://localhost:8080` on the Docker host and complete the first-user setup. The `init` service should show `Exited (0)`; the three application services should be running. On initial startup, `init` creates the directories below, gives the application UID/GID `10001` access, and runs Alembic as that user. It records the installed release so the deployment manager can later upgrade it with a backup. The short-lived initializer needs container root to prepare bind-mount permissions; the serving application containers remain non-root and none needs the Docker socket.
 
-`deploy` creates the following directories, owned by container UID/GID `10001`, and runs the versioned Alembic migration before serving the application:
+Persistent locations:
 
 | Host location | Contents |
 | --- | --- |
@@ -32,17 +31,37 @@ Open the HTTPS address printed by Tailscale and complete the first-user setup. R
 | `/srv/hoard-counter/backups/` | Verified full backup archives |
 | `/srv/hoard-counter/release.json` | Active release and matched rollback archive |
 
-Set `WHC_DATA_ROOT` to change the common storage directory. Keep it outside the checkout. `scripts/manage.py` needs permission to manage these directories and run Docker; the examples use `sudo`. No application container needs the Docker socket or root privileges.
+Set `WHC_DATA_ROOT` to change the common storage directory. Keep it outside the checkout. Docker startup preserves existing records, uploads, and release metadata. An existing untracked database, a mismatched schema/release, or active maintenance makes initialization fail instead of silently migrating or overwriting data. Inspect failures with `docker compose logs init api`.
+
+If you prefer the host manager for first installation, use `sudo python3 scripts/manage.py deploy --version 1.0.0` instead of the Compose startup command. It prepares the same storage and release metadata. It needs permission to manage these directories and run Docker; the examples use `sudo`.
+
+## Local and optional remote access
+
+| Setting | Default | Purpose |
+| --- | --- | --- |
+| `BIND_ADDRESS` | `127.0.0.1` | Host interface published by Docker |
+| `HTTP_PORT` | `8080` | Host port for the application |
+| `COOKIE_SECURE` | `false` | Use `false` for HTTP and `true` when accessed over HTTPS |
+
+For LAN access, set `BIND_ADDRESS` to the host's LAN IP, or `0.0.0.0` to listen on all IPv4 interfaces, then use `http://HOST-IP:8080`. Limit access to the intended household network. Only nginx publishes a port; Flask and Next.js remain internal to Docker.
+
+An existing Tailscale installation can be used just like another network interface: bind to the machine's Tailscale IP and open `http://TAILSCALE-IP:8080`. Alternatively, an SSH tunnel can reach the default loopback binding. Neither option requires changes to the application or a Tailscale container.
+
+HTTPS is optional and independent of the VPN choice. An HTTPS reverse proxy may forward to `http://127.0.0.1:8080`; preserve the public `Host` (including a nonstandard port), set `X-Forwarded-Proto: https`, and set `COOKIE_SECURE=true`. Keep the backend binding restricted to the proxy's access path. The bundled nginx also supports ordinary direct HTTP requests without forwarded headers.
+
+After editing access settings for the same installed release, run `docker compose up -d --wait`. When installing this updated application over an older version, first use the managed upgrade below so the new initializer is present in the image. Existing `.env` files are not overwritten by upgrades. If changing from the previous HTTPS/Tailscale setup to HTTP, explicitly set `COOKIE_SECURE=false`; clear cookies for the hostname or sign in through a fresh browser session if an old Secure cookie remains. With `COOKIE_SECURE=true`, use the HTTPS address to sign in.
 
 ## Releases and rollback
 
-Every release must use a new immutable tag. Keep the previous images available until the next successful release. On the Linux host, update the checkout to the desired revision, then run:
+Every release must use a new immutable tag. Keep the previous images available until the next successful release. Use the host manager (Python 3.11+) for upgrades; do not change `APP_VERSION` and run plain Compose against an older installed release. The initializer deliberately refuses that path. On the Linux host, update the checkout to the desired revision, then run:
 
 ```sh
 sudo python3 scripts/manage.py deploy --version 1.1.0
 ```
 
 The command builds while the previous version continues serving. It then enters a brief maintenance window, creates and verifies a complete pre-upgrade snapshot, stops the old API, runs `alembic upgrade head` from the new image, and waits for both new services to become healthy. Only then does it update the active release and reopen access. Database creation is not repeated on container startup.
+
+After a successful managed upgrade or restore, set `APP_VERSION` in `.env` to the active version shown by `scripts/manage.py status` before running direct Compose commands. The manager uses the explicit release tag and does not rewrite `.env`.
 
 If migration or readiness fails, the command restores the verified snapshot into fresh directories, switches the stopped data/uploads directories, and restarts the previous images. A failed command still exits nonzero after successful rollback so deployment monitoring sees the failed upgrade. If rollback itself fails, the maintenance page remains and the exception identifies the recovery snapshot. Old stopped directories are retained as `.replaced-<id>` under the storage root; inspect and remove those manually once recovery is confirmed.
 
@@ -130,6 +149,6 @@ The low-level restore creates `restored/data/hoardcounter.db`, `restored/uploads
 
 Run backend tests with `python -m pytest` from `backend/`. Backup tests exercise live WAL snapshots, full restore, hashes, unsafe archive paths, calendar retention boundaries, verification failure, shared-lock release, and actual database/upload recovery after a simulated migration failure. The deployment manager uses Python argument arrays rather than shell-built commands.
 
-Docker build, nginx execution, real container readiness, Tailscale connectivity, host reboot, and actual Linux cron must be checked on the destination host. The development environment used for initial implementation did not have a Docker daemon; mocked deployment failure tests do not replace that host smoke test.
+Docker build, nginx execution, real container readiness, local HTTP login, host reboot, and actual Linux cron must be checked on the destination host. If you configure remote access or HTTPS, verify that separately. The development environment used for initial implementation did not have a Docker daemon; mocked deployment failure tests do not replace that host smoke test.
 
 Before relying on the installation: create a test account and transaction with an attachment, make a backup, recreate the containers, confirm the data remains, and restore the archive into the separate rehearsal directory. For a subsequent release, verify one migration and its tested recovery path before entering important household records.
