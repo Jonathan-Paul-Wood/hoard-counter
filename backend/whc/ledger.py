@@ -12,7 +12,7 @@ import re
 from flask import current_app
 from sqlalchemy import select
 from .models import db, Record, Posting, AuditEvent, utcnow, new_id
-from .validation import (ApiError, ACCOUNT_TYPES, ASSET_TYPES, LIABILITY_TYPES,
+from .validation import (ApiError, ACCOUNT_TYPES, ASSET_TYPES, LIABILITY_TYPES, INVESTMENT_TYPES,
                          TRANSACTION_TYPES, amount, currency_code, date_string,
                          decimal, identifier, money, quantize, required_text, timestamp, CURRENCIES)
 from .recurrence import occurrences
@@ -145,7 +145,11 @@ def _validate_account(data, existing, preserve_snapshots=False):
 def _validate_transaction(data, existing=None, preserve_snapshots=False, historical=False):
     source = _reference(data, "source_account_id", "account", True, historical)
     destination = _reference(data, "destination_account_id", "account", True, historical)
-    if source.id == destination.id:
+    is_return = data.get("type") == "Return"
+    if is_return:
+        if source.id != destination.id or source.data.get("type") not in INVESTMENT_TYPES or source.data.get("account_class") != "asset":
+            raise ApiError("Returns require the same investment account as source and destination")
+    elif source.id == destination.id:
         raise ApiError("Source and destination must be different accounts")
     if data.get("type") not in TRANSACTION_TYPES:
         raise ApiError("Choose Income, Expense, Transfer, or Return")
@@ -154,7 +158,7 @@ def _validate_transaction(data, existing=None, preserve_snapshots=False, histori
     sclass, dclass = source.data["account_class"], destination.data["account_class"]
     financial = {"asset", "liability"}
     valid = {"Income": sclass == "income" and dclass in financial,
-             "Return": sclass == "income" and dclass == "asset",
+             "Return": is_return,
              "Transfer": sclass in financial and dclass in financial,
              "Expense": (sclass in financial and dclass == "expense") or (bool(data.get("is_refund")) and sclass == "expense" and dclass in financial)}
     if not valid[data["type"]]:
@@ -163,7 +167,9 @@ def _validate_transaction(data, existing=None, preserve_snapshots=False, histori
         raise ApiError("Only expenses may be marked as refunds")
     if data.get("investment_fee") and (data["type"] != "Expense" or data.get("is_refund")):
         raise ApiError("Investment fees must be outgoing expenses")
-    data["amount"] = amount(data.get("amount"), source.data["currency"], positive=True)
+    data["amount"] = amount(data.get("amount"), source.data["currency"], positive=not is_return)
+    if is_return and decimal(data["amount"]) == 0:
+        raise ApiError("Return amount must be positive or negative, not zero")
     # Preserve the exact saved conversion when an unrelated field is edited.
     s_changed = not existing or any(data.get(k) != existing.data.get(k) for k in ("date", "source_account_id"))
     d_changed = not existing or any(data.get(k) != existing.data.get(k) for k in ("date", "destination_account_id"))
@@ -173,10 +179,13 @@ def _validate_transaction(data, existing=None, preserve_snapshots=False, histori
         data["destination_fx_rate"] = money(rate_for(destination.data["currency"], data["date"]))
     if decimal(data["fx_rate"], "fx_rate") <= 0 or decimal(data["destination_fx_rate"], "destination_fx_rate") <= 0:
         raise ApiError("Conversion rates must be positive")
+    if is_return:
+        # Both fields represent one account; use the same saved conversion.
+        data["destination_fx_rate"] = data["fx_rate"]
     data["usd_amount"] = money(decimal(data["amount"]) * decimal(data["fx_rate"]))
     if not data.get("destination_amount"):
         data["destination_amount"] = money(quantize(decimal(data["usd_amount"]) / decimal(data["destination_fx_rate"]), destination.data["currency"]))
-    data["destination_amount"] = amount(data["destination_amount"], destination.data["currency"], "destination_amount", positive=True)
+    data["destination_amount"] = amount(data["destination_amount"], destination.data["currency"], "destination_amount", positive=not is_return)
     data["destination_usd_amount"] = money(decimal(data["destination_amount"]) * decimal(data["destination_fx_rate"]))
     data["currency"] = source.data["currency"]
     data["destination_currency"] = destination.data["currency"]
@@ -234,12 +243,18 @@ def _validate(kind, data, existing, preserve_snapshots=False, historical=False):
         required_text(data, "name", 160)
         source = _reference(data, "source_account_id", "account", True, historical)
         _reference(data, "destination_account_id", "account", True, historical)
-        if data["source_account_id"] == data["destination_account_id"]:
+        is_return = data.get("type") == "Return"
+        if is_return:
+            if data["source_account_id"] != data["destination_account_id"] or source.data.get("type") not in INVESTMENT_TYPES or source.data.get("account_class") != "asset":
+                raise ApiError("Returns require the same investment account as source and destination")
+        elif data["source_account_id"] == data["destination_account_id"]:
             raise ApiError("Subscription accounts must differ")
         data["currency"] = currency_code(data.get("currency", source.data["currency"]))
         if data["currency"] != source.data["currency"]:
             raise ApiError("Subscription amount uses the source account currency")
-        data["amount"] = amount(data.get("amount"), data["currency"], positive=True)
+        data["amount"] = amount(data.get("amount"), data["currency"], positive=not is_return)
+        if is_return and decimal(data["amount"]) == 0:
+            raise ApiError("Return amount must be positive or negative, not zero")
         data["amount_tolerance"] = amount(data.get("amount_tolerance", "0"), data["currency"], "amount_tolerance")
         if decimal(data["amount_tolerance"]) < 0:
             raise ApiError("Amount tolerance cannot be negative")
@@ -403,6 +418,12 @@ def _replace_postings(record, entries):
 def _transaction_postings(record):
     data = record.data
     source_usd, destination_usd = decimal(data["usd_amount"]), decimal(data["destination_usd_amount"])
+    if data["type"] == "Return":
+        _replace_postings(record, [
+            (data["source_account_id"], decimal(data["amount"]), source_usd),
+            (system_id("income"), -source_usd, -source_usd),
+        ])
+        return
     entries = [(data["source_account_id"], -decimal(data["amount"]), -source_usd),
                (data["destination_account_id"], decimal(data["destination_amount"]), destination_usd)]
     difference = source_usd - destination_usd

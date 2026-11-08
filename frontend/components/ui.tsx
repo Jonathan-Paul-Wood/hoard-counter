@@ -1,5 +1,7 @@
 "use client";
 
+import { HoardEggIcon } from "./hoard-art";
+
 import {
   createContext,
   useContext,
@@ -18,7 +20,6 @@ import {
   LoaderCircle,
   Plus,
   X,
-  Sprout,
   ArrowLeftRight,
 } from "lucide-react";
 import { api, errorMessage, money } from "@/lib/api";
@@ -81,7 +82,7 @@ export function Empty({
   return (
     <div className="empty">
       <div className="empty-icon">
-        <Sprout size={28} strokeWidth={1.5} />
+        <HoardEggIcon size={28} strokeWidth={1.5} />
       </div>
       <h3>{title}</h3>
       <p>{message}</p>

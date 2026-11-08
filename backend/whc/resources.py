@@ -6,7 +6,7 @@ from .models import db, Posting
 from .ledger import (get_record, list_records, public_record, save_record, void_record,
                      apply_transaction_rules, reconcile_account)
 from .recurrence import occurrences
-from .validation import ApiError, ACCOUNT_TYPES, TRANSACTION_TYPES, currency_definitions, date_string
+from .validation import ApiError, ACCOUNT_TYPES, INVESTMENT_TYPES, TRANSACTION_TYPES, currency_definitions, date_string
 
 bp = Blueprint("resources", __name__)
 RESOURCE_KINDS = {"accounts": "account", "transactions": "transaction", "categories": "category", "tags": "tag",
@@ -30,7 +30,7 @@ def kind_for(resource):
 @bp.get("/meta")
 @login_required
 def metadata():
-    return jsonify(account_types=ACCOUNT_TYPES, transaction_types=TRANSACTION_TYPES,
+    return jsonify(account_types=ACCOUNT_TYPES, investment_account_types=INVESTMENT_TYPES, transaction_types=TRANSACTION_TYPES,
                    account_classes=["asset", "liability", "income", "expense", "equity"],
                    currencies=currency_definitions(),
                    timezone=current_app.config.get("HOUSEHOLD_TIMEZONE", "America/New_York"), default_currency="USD")

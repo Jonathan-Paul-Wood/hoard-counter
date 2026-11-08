@@ -39,7 +39,7 @@ def transaction(source, destination, amount, when, typ='Transfer', **kwargs):
 def test_performance_cash_return_and_fee_count_once(household):
     portfolio = account()
     valuation(portfolio, '2024-01-01', '100')
-    transaction(system_id('income'), portfolio.id, '5', '2024-06-01', 'Return')
+    transaction(portfolio.id, portfolio.id, '5', '2024-06-01', 'Return')
     transaction(portfolio.id, system_id('expense'), '2', '2024-06-02', 'Expense', investment_fee=True)
     valuation(portfolio, '2025-01-01', '108')
     result = performance(portfolio.id)
@@ -56,6 +56,16 @@ def test_reconciliation_is_external_capital_not_a_gain(household):
     weight = D((date(2025, 1, 1) - date(2024, 7, 1)).days) / D(366)
     assert abs(D(result['cumulative_return']) - D(10) / (D(100) + weight * 20)) < D('1e-90')
     assert D(result['intervals'][0]['external_flows']) == 20
+
+
+def test_negative_return_counts_as_loss_not_external_flow(household):
+    portfolio = account()
+    valuation(portfolio, '2024-01-01', '100')
+    transaction(portfolio.id, portfolio.id, '-12', '2024-06-01', 'Return')
+    valuation(portfolio, '2025-01-01', '88')
+    result = performance(portfolio.id)
+    assert D(result['cumulative_return']) == D('-.12')
+    assert D(result['intervals'][0]['external_flows']) == 0
 
 
 def test_multiyear_fx_snapshots_and_future_values(household):

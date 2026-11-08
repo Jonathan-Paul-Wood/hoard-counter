@@ -1,4 +1,4 @@
-/** Custom brand artwork; Lucide interface icons remain unchanged. */
+/** Custom dragon and hoard artwork in the application's existing line-art style. */
 export function HoardMark() {
   return (
     <svg
@@ -59,15 +59,17 @@ export function DragonCaveArt() {
   );
 }
 
-export function HoardEggIcon() {
+type HoardIconProps = { size?: number; strokeWidth?: number };
+
+export function HoardEggIcon({ size = 20, strokeWidth = 1.5 }: HoardIconProps) {
   return (
     <svg
-      width="20"
-      height="20"
+      width={size}
+      height={size}
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
-      strokeWidth="1.5"
+      strokeWidth={strokeWidth}
       strokeLinecap="round"
       strokeLinejoin="round"
       aria-hidden="true"
@@ -75,6 +77,30 @@ export function HoardEggIcon() {
       <path d="M14 13c1-5-3-11-6-11S1 9 2 14c1 4 6 5 9 3M5 8l2 2-1 2 2 1" />
       <ellipse cx="16" cy="13" rx="6" ry="2" />
       <path d="M10 13v7c0 3 12 3 12 0v-7M10 15.4c0 3 12 3 12 0M10 17.7c0 3 12 3 12 0" />
+    </svg>
+  );
+}
+
+export function HoardCoinsIcon({
+  size = 20,
+  strokeWidth = 1.5,
+}: HoardIconProps) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={strokeWidth}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <ellipse cx="7" cy="4" rx="5" ry="2" />
+      <path d="M2 4v15c0 2.7 10 2.7 10 0V4M2 7c0 2.7 10 2.7 10 0M2 10c0 2.7 10 2.7 10 0M2 13c0 2.7 10 2.7 10 0M2 16c0 2.7 10 2.7 10 0" />
+      <ellipse cx="18" cy="13" rx="4" ry="2" />
+      <path d="M14 13v6c0 2.7 8 2.7 8 0v-6M14 16c0 2.7 8 2.7 8 0" />
     </svg>
   );
 }

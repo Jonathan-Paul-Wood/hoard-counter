@@ -146,6 +146,35 @@ def test_new_csv_preview_is_atomic_and_commit_applies_rules(household):
     assert committed.json['summary']['create'] == 1
 
 
+def test_signed_returns_csv_preview_commit_and_export(household):
+    app, client, headers, create, account, category = household
+    investment = create('accounts', {'name': 'Investments', 'type': 'Brokerage', 'currency': 'USD',
+                                    'opening_balance': '100', 'opening_date': '2024-01-01'})
+    identity = investment['id']
+    payload = (f'type,source_account_id,destination_account_id,date,amount,description\n'
+               f'Return,{identity},{identity},2026-07-15,15,Gain\n'
+               f'Return,{identity},{identity},2026-07-16,-25,Loss\n').encode()
+    preview = client.post('/api/v1/imports/preview', headers=headers,
+        data={'kind': 'transactions', 'file': (io.BytesIO(payload), 'returns.csv')})
+    assert preview.status_code == 200, preview.json
+    assert not preview.json['errors'], preview.json
+    assert not preview.json['conflicts'], preview.json
+    assert client.get('/api/v1/accounts/' + identity).json['balance'] == '100'
+    committed = client.post('/api/v1/imports/commit', headers=headers, json={'token': preview.json['token']})
+    assert committed.status_code == 200, committed.json
+    assert client.get('/api/v1/accounts/' + identity).json['balance'] == '90'
+    report = client.get('/api/v1/reports/data?start=2026-07-01&end=2026-07-31')
+    assert report.status_code == 200, report.json
+    assert report.json['summary']['returns'] == '-10'
+    exported = client.get('/api/v1/exports?format=transactions')
+    rows = list(csv.DictReader(io.StringIO(exported.data.decode('utf-8-sig'))))
+    assert sorted(row['amount'] for row in rows) == ['-25', '15']
+    preview = client.post('/api/v1/imports/preview', headers=headers,
+        data={'kind': 'transactions', 'file': (io.BytesIO(exported.data), 'returns.csv')})
+    assert not preview.json['errors'], preview.json
+    assert preview.json['summary']['skip'] == 2
+
+
 def test_stale_preview_rejected(household):
     app, client, headers, create, account, category = household
     export = client.get('/api/v1/exports?format=accounts')

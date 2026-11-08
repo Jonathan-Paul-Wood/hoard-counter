@@ -191,7 +191,7 @@ export function TransactionEditor({
   onClose: () => void;
   preset?: Partial<Entity>;
 }) {
-  const { accounts, categories, tags, subscriptions, notify, refresh } =
+  const { accounts, categories, tags, subscriptions, meta, notify, refresh } =
     useApp();
   const [values, setValues] = useState<any>({
     type: "Expense",
@@ -235,25 +235,32 @@ export function TransactionEditor({
     };
   }, [record?.id]);
   const put = (name: string, value: any) =>
-    setValues((v: any) => ({ ...v, [name]: value }));
+    setValues((v: any) => ({
+      ...v,
+      [name]: value,
+      ...(v.type === "Return" && name === "source_account_id"
+        ? { destination_account_id: value }
+        : {}),
+    }));
   const source = accounts.find(
       (a: Entity) => a.id === values.source_account_id,
     ),
     dest = accounts.find((a: Entity) => a.id === values.destination_account_id);
   const sourceOptions = accounts.filter((a: Entity) =>
-    values.type === "Income" || values.type === "Return"
-      ? a.account_class === "income"
-      : values.type === "Expense" && values.is_refund
-        ? a.account_class === "expense"
-        : values.type === "Return"
-          ? a.account_class === "asset"
+    values.type === "Return"
+      ? a.account_class === "asset" &&
+        meta.investment_account_types.includes(a.type)
+      : values.type === "Income"
+        ? a.account_class === "income"
+        : values.type === "Expense" && values.is_refund
+          ? a.account_class === "expense"
           : ["asset", "liability"].includes(a.account_class),
   );
   const destOptions = accounts.filter((a: Entity) =>
     values.type === "Expense" && !values.is_refund
       ? a.account_class === "expense"
       : values.type === "Return"
-        ? a.account_class === "asset"
+        ? a.id === values.source_account_id
         : ["asset", "liability"].includes(a.account_class),
   );
   async function submit(event: React.FormEvent) {
@@ -262,6 +269,10 @@ export function TransactionEditor({
     setError("");
     try {
       const body = { ...values };
+      if (body.type === "Return") {
+        body.destination_account_id = body.source_account_id;
+        body.destination_amount = body.amount;
+      }
       for (const key of [
         "id",
         "last_modified",
@@ -349,6 +360,8 @@ export function TransactionEditor({
                   put("type", type);
                   put("source_account_id", "");
                   put("destination_account_id", "");
+                  put("is_refund", false);
+                  put("investment_fee", false);
                 }}
               >
                 {type}
@@ -364,7 +377,11 @@ export function TransactionEditor({
                 onChange={(e) => put("description", e.target.value)}
               />
             </Field>
-            <Field label="From account">
+            <Field
+              label={
+                values.type === "Return" ? "Investment account" : "From account"
+              }
+            >
               <select
                 required
                 value={values.source_account_id}
@@ -381,6 +398,7 @@ export function TransactionEditor({
             <Field label="To account">
               <select
                 required
+                disabled={values.type === "Return"}
                 value={values.destination_account_id}
                 onChange={(e) => put("destination_account_id", e.target.value)}
               >
@@ -392,7 +410,14 @@ export function TransactionEditor({
                 ))}
               </select>
             </Field>
-            <Field label={`Amount${source ? ` (${source.currency})` : ""}`}>
+            <Field
+              label={`Amount${source ? ` (${source.currency})` : ""}`}
+              hint={
+                values.type === "Return"
+                  ? "Enter a positive gain or a negative loss."
+                  : "Enter a positive amount."
+              }
+            >
               <input
                 required
                 inputMode="decimal"

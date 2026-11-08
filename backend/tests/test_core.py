@@ -7,7 +7,7 @@ from whc.models import db, Posting, AuditEvent
 from whc.ledger import (save_record, get_record, list_records, account_balance,
                         system_id, public_record, void_record)
 from whc.recurrence import occurrences
-from whc.validation import ApiError
+from whc.validation import ApiError, INVESTMENT_TYPES
 
 
 @pytest.fixture
@@ -70,13 +70,83 @@ def test_fx_exact_precision_and_snapshots(app):
 def test_absolute_valuations_replay_after_retroactive_contribution(app):
     investment = account("Brokerage", "100", typ="Brokerage")
     checking = account()
-    transaction(system_id("income"), investment.id, "5", "2025-01-10", "Return")
+    transaction(investment.id, investment.id, "5", "2025-01-10", "Return")
     valuation = save_record("valuation", {"account_id": investment.id, "date": "2025-01-31", "amount": "110"}, None)
     adjustment = get_record("transaction", system_id("journal/valuation/" + valuation.id))
     assert Decimal(adjustment.data["amount"]) == Decimal("5")
     transaction(checking.id, investment.id, "20", "2025-01-15")
     assert Decimal(adjustment.data["amount"]) == Decimal("-15")
     assert account_balance(investment.id) == Decimal("110")
+    assert_balanced()
+
+
+@pytest.mark.parametrize("typ", INVESTMENT_TYPES)
+def test_signed_returns_change_investment_balance_once(app, typ):
+    investment = account("Investment", typ=typ)
+    gain = transaction(investment.id, investment.id, "15", typ="Return")
+    loss = transaction(investment.id, investment.id, "-7.50", typ="Return")
+    assert account_balance(investment.id) == Decimal("107.50")
+    assert Decimal(loss.data["destination_amount"]) == Decimal("-7.50")
+    save_record("transaction", {"amount": "-20"}, None, gain.id, gain.revision)
+    assert account_balance(investment.id) == Decimal("72.50")
+    void_record("transaction", loss.id, None, loss.revision)
+    assert account_balance(investment.id) == Decimal("80")
+    assert_balanced()
+
+
+@pytest.mark.parametrize("typ", ["Checking", "Savings", "Wallet", "Credit Card", "Income Source", "Expense Payee", "Equity"])
+def test_return_rejects_noninvestment_account(app, typ):
+    other = account("Not an investment", "0", typ=typ)
+    with pytest.raises(ApiError, match="same investment account"):
+        transaction(other.id, other.id, typ="Return")
+
+
+def test_return_requires_same_account_and_matching_amounts(app):
+    first, second = account(typ="Brokerage"), account("IRA", typ="Roth IRA")
+    for source, destination in [(first.id, second.id), (system_id("income"), first.id)]:
+        with pytest.raises(ApiError, match="same investment account"):
+            transaction(source, destination, typ="Return")
+    with pytest.raises(ApiError, match="not zero"):
+        transaction(first.id, first.id, "0", typ="Return")
+    with pytest.raises(ApiError, match="Amounts must agree"):
+        transaction(first.id, first.id, "-5", typ="Return", destination_amount="5")
+
+
+@pytest.mark.parametrize("typ", ["Expense", "Income", "Transfer"])
+@pytest.mark.parametrize("value", ["-5", "0"])
+def test_other_transaction_amounts_must_stay_positive(app, typ, value):
+    checking, savings = account(), account("Savings", "0", typ="Savings")
+    source, destination = {
+        "Expense": (checking.id, system_id("expense")),
+        "Income": (system_id("income"), checking.id),
+        "Transfer": (checking.id, savings.id),
+    }[typ]
+    with pytest.raises(ApiError, match="greater than zero"):
+        transaction(source, destination, value, typ=typ)
+    with pytest.raises(ApiError, match="greater than zero"):
+        transaction(source, destination, "5", typ=typ, destination_amount=value)
+    with pytest.raises(ApiError, match="different accounts"):
+        transaction(checking.id, checking.id, "5", typ=typ)
+
+
+def test_foreign_return_uses_signed_native_and_usd_amounts(app):
+    save_record("rate", {"currency": "EUR", "date": "2025-01-01", "rate": "1.25"}, None)
+    investment = account("Euro investment", "0", "EUR", "Brokerage")
+    loss = transaction(investment.id, investment.id, "-8", typ="Return")
+    assert account_balance(investment.id) == Decimal("-8")
+    assert Decimal(loss.data["usd_amount"]) == Decimal("-10")
+    assert Decimal(loss.data["destination_usd_amount"]) == Decimal("-10")
+    assert_balanced()
+
+
+def test_signed_return_subscription(app):
+    investment = account(typ="Brokerage")
+    sub = save_record("subscription", {"name": "Monthly loss", "type": "Return",
+        "source_account_id": investment.id, "destination_account_id": investment.id,
+        "amount": "-5", "start_date": "2025-01-05", "frequency": "monthly"}, None)
+    tx = transaction(investment.id, investment.id, "-5", typ="Return")
+    assert tx.data["subscription_id"] == sub.id
+    assert account_balance(investment.id) == Decimal("95")
     assert_balanced()
 
 

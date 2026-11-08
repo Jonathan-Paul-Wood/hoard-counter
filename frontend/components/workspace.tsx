@@ -11,13 +11,11 @@ import {
   FileChartColumn,
   House,
   Landmark,
-  Leaf,
   LoaderCircle,
   LogOut,
   Menu,
   Settings2,
   ShieldCheck,
-  Sprout,
   Target,
   TrendingUp,
   X,
@@ -43,7 +41,7 @@ import {
   Subscriptions,
 } from "./planning";
 import { Settings } from "./settings";
-import { DragonCaveArt, HoardMark } from "./hoard-art";
+import { DragonCaveArt, HoardMark, HoardCoinsIcon } from "./hoard-art";
 
 const nav = [
   { id: "dashboard", label: "Overview", icon: House },
@@ -235,7 +233,7 @@ export default function Workspace() {
           </button>
           <div className="hoard-label">
             <span className="hoard-avatar">
-              <Leaf size={15} />
+              <HoardCoinsIcon size={15} />
             </span>
             <div>
               {hoardName}

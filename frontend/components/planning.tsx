@@ -1,5 +1,7 @@
 "use client";
 
+import { HoardEggIcon } from "./hoard-art";
+
 import { useState } from "react";
 import {
   ArrowDownLeft,
@@ -9,7 +11,6 @@ import {
   Copy,
   Download,
   Plus,
-  Sprout,
   Trash2,
   TrendingUp,
 } from "lucide-react";
@@ -107,7 +108,7 @@ export function Dashboard() {
                 value={money(data.net_worth)}
                 hint={`${accounts.filter((a: Entity) => ["asset", "liability"].includes(a.account_class)).length} financial accounts · valued in USD`}
                 accent
-                icon={<Sprout size={21} />}
+                icon={<HoardEggIcon size={21} />}
               />
               <Stat
                 label="Income this period"
@@ -124,14 +125,14 @@ export function Dashboard() {
               <Stat
                 label="Investment returns"
                 value={money(data.returns)}
-                hint="Cash investment earnings"
+                hint="Investment gains and losses"
                 icon={<TrendingUp size={20} />}
               />
             </div>
             {!accounts.some((a: Entity) => a.account_class === "asset") && (
               <div className="welcome-banner">
                 <div className="welcome-illustration">
-                  <Sprout size={43} strokeWidth={1.2} />
+                  <HoardEggIcon size={43} strokeWidth={1.2} />
                 </div>
                 <div>
                   <div className="eyebrow">LET’S GROW THE HOARD</div>
@@ -228,7 +229,7 @@ export function Dashboard() {
                   </div>
                 </div>
                 <div className="gentle-note">
-                  <Sprout size={19} />
+                  <HoardEggIcon size={19} />
                   <p>
                     Small habits. Strong foundations.
                     <br />
@@ -563,7 +564,7 @@ export function Forecasts() {
                 </p>
               </div>
               <div className="forecast-emblem">
-                <Sprout size={82} strokeWidth={0.8} />
+                <HoardEggIcon size={82} strokeWidth={0.8} />
               </div>
             </div>
             <div className="stats three">

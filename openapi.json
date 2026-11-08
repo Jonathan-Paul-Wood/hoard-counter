@@ -8647,6 +8647,12 @@
                         "type": "string"
                       }
                     },
+                    "investment_account_types": {
+                      "type": "array",
+                      "items": {
+                        "type": "string"
+                      }
+                    },
                     "transaction_types": {
                       "type": "array",
                       "items": {
@@ -8677,6 +8683,7 @@
                   },
                   "required": [
                     "account_types",
+                    "investment_account_types",
                     "transaction_types",
                     "account_classes",
                     "currencies",
