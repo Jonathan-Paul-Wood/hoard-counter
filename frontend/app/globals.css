@@ -139,6 +139,9 @@ input[type="file"]::file-selector-button {
 .sidebar {
   width: var(--sidebar);
   height: 100vh;
+  height: 100dvh;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
   position: fixed;
   top: 0;
   left: 0;
@@ -148,6 +151,9 @@ input[type="file"]::file-selector-button {
   display: flex;
   flex-direction: column;
   z-index: 30;
+}
+.sidebar > * {
+  flex-shrink: 0;
 }
 .brand {
   display: flex;
@@ -183,7 +189,7 @@ input[type="file"]::file-selector-button {
   padding: 0 4px;
   color: inherit;
 }
-.household-label {
+.hoard-label {
   display: flex;
   gap: 10px;
   align-items: center;
@@ -194,7 +200,7 @@ input[type="file"]::file-selector-button {
   font-size: 12px;
   font-weight: 600;
 }
-.household-avatar {
+.hoard-avatar {
   background: #e7eedf;
   color: var(--green);
   width: 29px;
@@ -203,7 +209,7 @@ input[type="file"]::file-selector-button {
   place-items: center;
   border-radius: 7px;
 }
-.household-label div > span {
+.hoard-label div > span {
   display: block;
   font-size: 9px;
   font-weight: 400;
@@ -2006,12 +2012,12 @@ td strong {
   color: #a7b99b;
   margin-top: 26px;
 }
-.tree-art {
+.dragon-cave-art {
   max-width: 450px;
   margin-top: 17px;
   opacity: 0.9;
 }
-.tree-art svg {
+.dragon-cave-art svg {
   width: 100%;
   height: auto;
   display: block;
@@ -2219,11 +2225,11 @@ td strong {
   .brand-icon {
     width: 32px;
   }
-  .household-label {
+  .hoard-label {
     padding: 10px 7px;
     font-size: 11px;
   }
-  .household-label div > span {
+  .hoard-label div > span {
     font-size: 8px;
   }
   .nav-item {
@@ -2749,7 +2755,7 @@ td strong {
     font-size: 11px;
     margin-top: 16px;
   }
-  .tree-art {
+  .dragon-cave-art {
     display: none;
   }
   .auth-foot {

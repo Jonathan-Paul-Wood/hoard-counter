@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { HoardEggIcon } from "./hoard-art";
 import {
   ArrowDownToLine,
   ArrowLeft,
@@ -898,7 +899,7 @@ export function Accounts() {
                     : "-" + liability,
                 ]),
               )}
-              icon={<SproutIcon />}
+              icon={<HoardEggIcon />}
             />
           </div>
           <div className="section-header">
@@ -1050,21 +1051,6 @@ export function Accounts() {
     </>
   );
 }
-function SproutIcon() {
-  return (
-    <svg
-      width="20"
-      height="20"
-      viewBox="0 0 20 20"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.5"
-    >
-      <path d="M10 17V9m0 3C3 12 3 5 3 5s7 0 7 7Zm0-3c0-6 7-6 7-6s0 6-7 6Z" />
-    </svg>
-  );
-}
-
 export function ResourceTable({
   resource,
   title,

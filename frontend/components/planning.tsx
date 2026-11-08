@@ -73,7 +73,7 @@ export function Dashboard() {
       <PageHead
         eyebrow="A LITTLE CLARITY, EVERY DAY"
         title="The bigger picture"
-        subtitle="A quiet place to keep your household finances in order."
+        subtitle="A quiet place to keep your hoard finances in order."
         action={
           <>
             <label className="period-picker">
@@ -103,7 +103,7 @@ export function Dashboard() {
             ))}
             <div className="stats four">
               <Stat
-                label="Household net worth"
+                label="Hoard net worth"
                 value={money(data.net_worth)}
                 hint={`${accounts.filter((a: Entity) => ["asset", "liability"].includes(a.account_class)).length} financial accounts · valued in USD`}
                 accent
@@ -134,7 +134,7 @@ export function Dashboard() {
                   <Sprout size={43} strokeWidth={1.2} />
                 </div>
                 <div>
-                  <div className="eyebrow">LET’S PUT DOWN ROOTS</div>
+                  <div className="eyebrow">LET’S GROW THE HOARD</div>
                   <h2>A little setup. A lot more peace of mind.</h2>
                   <p>
                     Add your first account, set a starting balance, and make
@@ -309,7 +309,7 @@ export function Budgets() {
     <>
       <PageHead
         title="Make room for what matters"
-        subtitle="A monthly plan that grows with your household."
+        subtitle="A monthly plan that grows with your hoard."
         action={
           <>
             <input

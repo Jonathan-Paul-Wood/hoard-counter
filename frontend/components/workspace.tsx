@@ -32,7 +32,7 @@ import {
   setCsrf,
   setCurrencyPrecisions,
 } from "@/lib/api";
-import { AppContext, Button, ErrorBox, Field, Loading } from "./ui";
+import { AppContext, Button, ErrorBox, Field, Loading, Modal } from "./ui";
 import { Accounts, Transactions } from "./records";
 import {
   Budgets,
@@ -43,6 +43,7 @@ import {
   Subscriptions,
 } from "./planning";
 import { Settings } from "./settings";
+import { DragonCaveArt, HoardMark } from "./hoard-art";
 
 const nav = [
   { id: "dashboard", label: "Overview", icon: House },
@@ -75,13 +76,19 @@ export default function Workspace() {
   const [loading, setLoading] = useState(true);
   const [view, setView] = useState("dashboard");
   const [mobile, setMobile] = useState(false);
+  const [logoutOpen, setLogoutOpen] = useState(false);
+  const [logoutBusy, setLogoutBusy] = useState(false);
+  const [logoutError, setLogoutError] = useState("");
+  const closeLogout = useCallback(() => {
+    if (!logoutBusy) setLogoutOpen(false);
+  }, [logoutBusy]);
   const [version, setVersion] = useState(0);
   const [accounts, setAccounts] = useState<Entity[]>([]);
   const [categories, setCategories] = useState<Entity[]>([]);
   const [tags, setTags] = useState<Entity[]>([]);
   const [subscriptions, setSubscriptions] = useState<Entity[]>([]);
   const [meta, setMeta] = useState<any>(null);
-  const [householdName, setHouseholdName] = useState("Our household");
+  const [hoardName, setHoardName] = useState("Our hoard");
   const [referenceError, setReferenceError] = useState("");
   const [toasts, setToasts] = useState<
     { id: number; message: string; type: string }[]
@@ -141,7 +148,7 @@ export default function Workspace() {
           setSubscriptions(s);
           setCurrencyPrecisions(m.currencies || []);
           setMeta(m);
-          setHouseholdName(preferences.household_name || "Our household");
+          setHoardName(preferences.household_name || "Our hoard");
         }
       })
       .catch((e) => {
@@ -152,15 +159,24 @@ export default function Workspace() {
     };
   }, [session?.user?.id, version]);
   async function logout() {
+    if (logoutBusy) return;
+    setLogoutBusy(true);
+    setLogoutError("");
     try {
       await api("/auth/logout", { method: "POST" });
+      setLogoutOpen(false);
+      setMobile(false);
+      setSession(null);
+      setCsrf("");
       setAccounts([]);
       setCategories([]);
       setTags([]);
       setSubscriptions([]);
       await loadSession();
     } catch (e) {
-      notify(errorMessage(e), "error");
+      setLogoutError(errorMessage(e));
+    } finally {
+      setLogoutBusy(false);
     }
   }
   if (loading)
@@ -217,13 +233,13 @@ export default function Workspace() {
           >
             <Brand />
           </button>
-          <div className="household-label">
-            <span className="household-avatar">
+          <div className="hoard-label">
+            <span className="hoard-avatar">
               <Leaf size={15} />
             </span>
             <div>
-              {householdName}
-              <span>Your shared financial home</span>
+              {hoardName}
+              <span>Your shared treasure ledger</span>
             </div>
           </div>
           <div className="nav-section-label">WORKSPACE</div>
@@ -255,6 +271,16 @@ export default function Workspace() {
               <Settings2 size={18} />
               Settings
             </button>
+            <button
+              className="nav-item"
+              onClick={() => {
+                setLogoutError("");
+                setLogoutOpen(true);
+              }}
+            >
+              <LogOut size={18} />
+              Logout
+            </button>
             <div className="user-row">
               <div className="user-avatar">
                 {session.user.username[0].toUpperCase()}
@@ -264,16 +290,9 @@ export default function Workspace() {
                 <span>
                   {session.user.role === "admin"
                     ? "Administrator"
-                    : "Household member"}
+                    : "Hoard member"}
                 </span>
               </div>
-              <button
-                className="icon-button"
-                aria-label="Sign out"
-                onClick={logout}
-              >
-                <LogOut size={17} />
-              </button>
             </div>
           </div>
         </aside>
@@ -324,6 +343,26 @@ export default function Workspace() {
           </footer>
         </div>
       </div>
+      {logoutOpen && (
+        <Modal title="Logout?" onClose={closeLogout}>
+          <p className="dialog-copy">
+            Are you sure you want to end your session?
+          </p>
+          <ErrorBox error={logoutError} />
+          <div className="modal-footer">
+            <Button
+              variant="secondary"
+              disabled={logoutBusy}
+              onClick={closeLogout}
+            >
+              Cancel
+            </Button>
+            <Button busy={logoutBusy} onClick={logout}>
+              Logout
+            </Button>
+          </div>
+        </Modal>
+      )}
       <div className="toast-stack" aria-live="polite">
         {toasts.map((t) => (
           <div
@@ -355,18 +394,7 @@ function Brand() {
   return (
     <div className="brand">
       <div className="brand-icon">
-        <svg
-          width="28"
-          height="30"
-          viewBox="0 0 32 36"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="1.6"
-          strokeLinejoin="round"
-        >
-          <path d="M16 2 7 14h5L4 25h10v8h4v-8h10l-8-11h5Z" />
-          <path d="M16 13v12" />
-        </svg>
+        <HoardMark />
       </div>
       <div>
         <strong>Hoard</strong>
@@ -418,36 +446,8 @@ function Auth({
             <br />
             Together in one thoughtful place.
           </p>
-          <div className="tree-art" aria-hidden="true">
-            <svg viewBox="0 0 440 260" fill="none">
-              <path
-                d="M25 238c87-18 160-11 204 0s102 16 190-9"
-                stroke="#9bb09a"
-                strokeWidth="1.3"
-              />
-              <path
-                d="M175 231V62m0 0-66 80h36l-61 69h181l-61-69h36L175 62Z"
-                stroke="#dce7d4"
-                strokeWidth="1.5"
-              />
-              <path
-                d="M284 236V119m0 0-41 48h22l-37 43h112l-38-43h23l-41-48Z"
-                stroke="#a0b997"
-                strokeWidth="1.3"
-              />
-              <circle
-                cx="309"
-                cy="66"
-                r="21"
-                stroke="#c7cba5"
-                strokeWidth="1.2"
-              />
-              <path
-                d="m140 212 35-31 33 29m-49-62 16-13 16 13m-79 80 37-3m89 14 48-2"
-                stroke="#8ca685"
-                strokeWidth="1.2"
-              />
-            </svg>
+          <div className="dragon-cave-art" aria-hidden="true">
+            <DragonCaveArt />
           </div>
         </div>
         <div className="auth-foot">
@@ -458,15 +458,15 @@ function Auth({
       <section className="auth-form-area">
         <div className="auth-form">
           <div className="eyebrow">
-            {setup ? "PLANT THE FIRST SEED" : "WELCOME HOME"}
+            {setup ? "BUILD YOUR FIRST HOARD" : "WELCOME HOME"}
           </div>
           <h2>
-            {setup ? "Start your household ledger" : "Good to see you again."}
+            {setup ? "Start your hoard ledger" : "Good to see you again."}
           </h2>
           <p>
             {setup
               ? "Create an administrator account to bring your finances together."
-              : "Sign in to your household’s financial home."}
+              : "Sign in to count and care for your hoard."}
           </p>
           <form onSubmit={submit}>
             <Field label="Username">
@@ -501,12 +501,12 @@ function Auth({
             </Field>
             <ErrorBox error={error} />
             <Button busy={busy} className="auth-submit">
-              {setup ? "Create your household" : "Sign in"}
+              {setup ? "Create your hoard" : "Sign in"}
               <ArrowRight size={17} />
             </Button>
           </form>
           <p className="auth-small">
-            Your records are stored privately on your household’s server.
+            Your records are stored privately on your hoard’s server.
           </p>
         </div>
       </section>

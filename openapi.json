@@ -3,7 +3,7 @@
   "info": {
     "title": "Hoard Counter",
     "version": "1.0.0",
-    "description": "One household, exact decimal amounts, optimistic revisions, authenticated session cookies and CSRF protection."
+    "description": "One hoard, exact decimal amounts, optimistic revisions, authenticated session cookies and CSRF protection."
   },
   "servers": [
     {
@@ -8632,7 +8632,7 @@
     },
     "/meta": {
       "get": {
-        "summary": "Read available account types, currencies, and household defaults",
+        "summary": "Read available account types, currencies, and hoard defaults",
         "responses": {
           "200": {
             "description": "Success",
@@ -9683,7 +9683,7 @@
     },
     "/settings": {
       "get": {
-        "summary": "Read household settings",
+        "summary": "Read hoard settings",
         "responses": {
           "200": {
             "description": "Success",
@@ -9788,7 +9788,7 @@
         }
       },
       "patch": {
-        "summary": "Edit household settings (administrator)",
+        "summary": "Edit hoard settings (administrator)",
         "responses": {
           "200": {
             "description": "Success",
@@ -9915,7 +9915,7 @@
     },
     "/users": {
       "get": {
-        "summary": "List household users (administrator)",
+        "summary": "List hoard users (administrator)",
         "responses": {
           "200": {
             "description": "Success",
@@ -10035,7 +10035,7 @@
         }
       },
       "post": {
-        "summary": "Create household user (administrator)",
+        "summary": "Create hoard user (administrator)",
         "responses": {
           "201": {
             "description": "Success",
@@ -11369,7 +11369,7 @@
         }
       ],
       "patch": {
-        "summary": "Edit household user (administrator)",
+        "summary": "Edit hoard user (administrator)",
         "responses": {
           "200": {
             "description": "Success",
@@ -11494,7 +11494,7 @@
         ]
       },
       "delete": {
-        "summary": "Deactivate household user (administrator)",
+        "summary": "Deactivate hoard user (administrator)",
         "responses": {
           "200": {
             "description": "Success",

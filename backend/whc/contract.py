@@ -149,16 +149,16 @@ def specification():
 
     id_parameter = {'name': 'id', 'in': 'path', 'required': True, 'schema': ID}
     paths['/users'] = {
-        'get': operation('List household users (administrator)', listing('User')),
-        'post': operation('Create household user (administrator)', ref('User'), ref('UserInput'), 'post'),
+        'get': operation('List hoard users (administrator)', listing('User')),
+        'post': operation('Create hoard user (administrator)', ref('User'), ref('UserInput'), 'post'),
     }
     paths['/users/{id}'] = {'parameters': [id_parameter],
-        'patch': operation('Edit household user (administrator)', ref('User'), ref('UserPatch'), 'patch'),
-        'delete': operation('Deactivate household user (administrator)', ref('User'), method='delete'),
+        'patch': operation('Edit hoard user (administrator)', ref('User'), ref('UserPatch'), 'patch'),
+        'delete': operation('Deactivate hoard user (administrator)', ref('User'), method='delete'),
     }
     paths['/users/{id}']['delete']['description'] = 'Marks active=false without deleting audit history. Administrators cannot deactivate themselves. No revision or request body is required.'
-    paths['/settings'] = {'get': operation('Read household settings', ref('Settings')),
-                          'patch': operation('Edit household settings (administrator)', ref('Settings'), ref('SettingsPatch'), 'patch')}
+    paths['/settings'] = {'get': operation('Read hoard settings', ref('Settings')),
+                          'patch': operation('Edit hoard settings (administrator)', ref('Settings'), ref('SettingsPatch'), 'patch')}
     paths['/attachments']['get'] = operation('List attachments', listing('Attachment'))
     paths['/attachments']['get']['parameters'] = [query('transaction_id', ID)]
     download = operation('Download private attachment')
@@ -176,7 +176,7 @@ def specification():
     paths['/backups/status'] = {'get': operation('Read backup status (administrator)', ref('BackupStatus'))}
     paths['/audit'] = {'get': operation('Read audit history', listing('AuditEvent', paginated=True))}
     paths['/audit']['get']['parameters'] = [query('page', {'type': 'integer', 'minimum': 1}), query('page_size', {'type': 'integer', 'minimum': 1, 'maximum': 200}), query('record_id', ID), query('kind')]
-    paths['/meta'] = {'get': operation('Read available account types, currencies, and household defaults', obj({'account_types': {'type': 'array', 'items': string()}, 'transaction_types': {'type': 'array', 'items': string()}, 'account_classes': {'type': 'array', 'items': string()}, 'currencies': {'type': 'array', 'items': ref('CurrencyDefinition')}, 'timezone': string(), 'default_currency': string(enum=['USD'])}, ['account_types', 'transaction_types', 'account_classes', 'currencies', 'timezone', 'default_currency']))}
+    paths['/meta'] = {'get': operation('Read available account types, currencies, and hoard defaults', obj({'account_types': {'type': 'array', 'items': string()}, 'transaction_types': {'type': 'array', 'items': string()}, 'account_classes': {'type': 'array', 'items': string()}, 'currencies': {'type': 'array', 'items': ref('CurrencyDefinition')}, 'timezone': string(), 'default_currency': string(enum=['USD'])}, ['account_types', 'transaction_types', 'account_classes', 'currencies', 'timezone', 'default_currency']))}
     paths['/openapi.json'] = {'get': operation('Read this OpenAPI contract')}
     paths['/health'] = {'servers': [{'url': '/api'}], 'get': {'summary': 'Check schema and database readiness', 'security': [], 'responses': {'200': {'description': 'Ready', 'content': {'application/json': {'schema': obj({'status': string(enum=['ok']), 'schema': string()}, ['status', 'schema'])}}}, '503': {'description': 'Migration required or database unavailable', 'content': {'application/json': {'schema': obj({'status': string(enum=['unhealthy']), 'reason': string()}, ['status', 'reason'])}}}}}}
     filters = [query(key, DAY if key in ('start', 'end') else ID if key.endswith('_id') else string()) for key in ('start', 'end', 'account_id', 'type', 'category_id', 'tag_id', 'subscription_id', 'currency', 'account_type')]
@@ -188,4 +188,4 @@ def specification():
     paths['/performance']['get']['parameters'] = [query('account_id', ID, required=True)]
     paths['/exports']['get']['parameters'] = [query('format', string(enum=['archive', 'accounts', 'transactions'], default='archive')), query('template', {'type': 'boolean', 'default': False})]
     paths['/exports']['get']['responses']['200']['content']['text/csv'] = {'schema': string(format='binary')}
-    return {'openapi': '3.1.0', 'info': {'title': 'Hoard Counter', 'version': '1.0.0', 'description': 'One household, exact decimal amounts, optimistic revisions, authenticated session cookies and CSRF protection.'}, 'servers': [{'url': '/api/v1'}], 'security': [{'sessionCookie': []}], 'paths': paths, 'components': {'schemas': schemas, 'securitySchemes': {'sessionCookie': {'type': 'apiKey', 'in': 'cookie', 'name': 'session'}}}}
+    return {'openapi': '3.1.0', 'info': {'title': 'Hoard Counter', 'version': '1.0.0', 'description': 'One hoard, exact decimal amounts, optimistic revisions, authenticated session cookies and CSRF protection.'}, 'servers': [{'url': '/api/v1'}], 'security': [{'sessionCookie': []}], 'paths': paths, 'components': {'schemas': schemas, 'securitySchemes': {'sessionCookie': {'type': 'apiKey', 'in': 'cookie', 'name': 'session'}}}}

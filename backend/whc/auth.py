@@ -60,7 +60,7 @@ def auth_session():
 @bp.post("/auth/setup")
 def setup():
     if db.session.scalar(select(User.id).limit(1)):
-        raise ApiError("The household has already been set up", 409, "setup_complete")
+        raise ApiError("The hoard has already been set up", 409, "setup_complete")
     username, password = user_credentials(request.get_json(silent=True) or {})
     user = User(username=username, password_hash=generate_password_hash(password), role="admin")
     db.session.add(user)

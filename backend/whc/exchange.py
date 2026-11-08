@@ -296,17 +296,17 @@ def import_special(kind, data, existing, actor):
     elif kind == 'setting':
         # Settings can only be changed by an administrator, including imports.
         if actor.role != 'admin':
-            raise ApiError('Only administrators can import household settings.', 403)
+            raise ApiError('Only administrators can import hoard settings.', 403)
         if clean.get('default_currency', 'USD') != 'USD':
-            raise ValueError('The household reporting currency must be USD.')
+            raise ValueError('The hoard reporting currency must be USD.')
         if not isinstance(clean.get('household_name'), str) or not clean['household_name'].strip() or len(clean['household_name']) > 100:
-            raise ValueError('Enter a household name of at most 100 characters.')
+            raise ValueError('Enter a hoard name of at most 100 characters.')
         try:
             ZoneInfo(clean.get('timezone', current_app.config['HOUSEHOLD_TIMEZONE']))
         except (ZoneInfoNotFoundError, TypeError, ValueError):
             raise ValueError('Select a valid IANA timezone.')
         if not data.get('deleted') and any(row.id != identity for row in list_records('setting')):
-            raise ValueError('Household settings already exist with another UUID.')
+            raise ValueError('Hoard settings already exist with another UUID.')
     elif kind == 'transaction':
         if clean.get('system') != 'reconciliation':
             raise ValueError('Derived journal rows must not be imported.')

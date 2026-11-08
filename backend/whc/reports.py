@@ -134,7 +134,7 @@ def dollars(value):
 
 def build_pdf(report):
     buffer = io.BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=(8.5 * inch, 11 * inch), rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40, title='Hoard Counter - Household Report', author='Hoard Counter')
+    doc = SimpleDocTemplate(buffer, pagesize=(8.5 * inch, 11 * inch), rightMargin=40, leftMargin=40, topMargin=40, bottomMargin=40, title='Hoard Counter - Hoard Report', author='Hoard Counter')
     styles = getSampleStyleSheet()
     styles.add(ParagraphStyle(name='SmallCell', fontName='Helvetica', fontSize=8, leading=11, spaceAfter=0, textColor=colors.HexColor('#26382f')))
     styles.add(ParagraphStyle(name='MoneyCell', parent=styles['SmallCell'], alignment=TA_RIGHT))
@@ -148,7 +148,7 @@ def build_pdf(report):
         result = Table([[p(c) for c in row] for row in rows], colWidths=widths, repeatRows=1 if header else 0, hAlign='LEFT')
         result.setStyle(TableStyle([('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#e8eee8')), ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f6f7f3')]), ('VALIGN', (0, 0), (-1, -1), 'TOP'), ('LEFTPADDING', (0, 0), (-1, -1), 7), ('RIGHTPADDING', (0, 0), (-1, -1), 7), ('TOPPADDING', (0, 0), (-1, -1), 7), ('BOTTOMPADDING', (0, 0), (-1, -1), 7), ('LINEBELOW', (0, 0), (-1, 0), 0.5, colors.HexColor('#c6d3c9'))]))
         return result
-    story = [p('Hoard Counter', 'Title'), p('Household financial report', 'Heading2'), p(f"{report['start']} through {report['end']}  |  Reporting currency: USD", 'Normal'), Spacer(1, 18)]
+    story = [p('Hoard Counter', 'Title'), p('Hoard financial report', 'Heading2'), p(f"{report['start']} through {report['end']}  |  Reporting currency: USD", 'Normal'), Spacer(1, 18)]
     summary = report['summary']
     story.append(table([['Income', 'Spending', 'Cash returns', 'Net cash flow'], [dollars(summary[k]) for k in ('income', 'expenses', 'returns', 'net')]], [133] * 4))
     story.extend([Spacer(1, 14), p('Balances at period end', 'Heading2')])
@@ -219,7 +219,7 @@ def build_pdf(report):
         canvas.saveState()
         canvas.setFont('Helvetica', 8)
         canvas.setFillColor(colors.HexColor('#68766a'))
-        canvas.drawString(40, 22, 'Hoard Counter | Household financial report | USD')
+        canvas.drawString(40, 22, 'Hoard Counter | Hoard financial report | USD')
         canvas.drawRightString(572, 22, f'Page {document.page}')
         canvas.restoreState()
     doc.build(story, onFirstPage=footer, onLaterPages=footer)

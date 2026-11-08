@@ -42,7 +42,7 @@ export function Settings() {
     ...(session.user.role === "admin"
       ? [
           ["currencies", "Currencies"],
-          ["household", "Household"],
+          ["hoard", "Hoard"],
           ["users", "People"],
           ["backups", "Backups"],
         ]
@@ -52,7 +52,7 @@ export function Settings() {
     <>
       <PageHead
         title="Keep things in order"
-        subtitle="The little details that make your household ledger your own."
+        subtitle="The little details that make your hoard ledger your own."
       />
       <div className="tabs page-tabs wrap">
         {tabs.map(([v, l]) => (
@@ -177,13 +177,13 @@ export function Settings() {
           ]}
         />
       )}{" "}
-      {tab === "household" && <Household />}{" "}
+      {tab === "hoard" && <Hoard />}{" "}
       {tab === "users" && (
         <ResourceTable
           resource="users"
-          title="Household members"
+          title="Hoard members"
           heading={false}
-          description="Separate logins. One shared household ledger."
+          description="Separate logins. One shared hoard ledger."
           columns={[
             { key: "username", label: "Username" },
             { key: "role", label: "Role" },
@@ -527,7 +527,7 @@ function Audit() {
   return (
     <Panel
       title="Audit trail"
-      subtitle="An immutable history of changes to your household records."
+      subtitle="An immutable history of changes to your hoard records."
     >
       <ErrorBox error={error} />
       {loading ? (
@@ -611,25 +611,25 @@ function Audit() {
   );
 }
 
-function Household() {
+function Hoard() {
   const { version } = useApp();
   const { data, loading, error } = useLoad<any>("/settings", null, version);
   return (
     <Panel
-      title="Household settings"
-      subtitle="Preferences shared by everyone in your household."
+      title="Hoard settings"
+      subtitle="Preferences shared by everyone in your hoard."
     >
       <ErrorBox error={error} />
-      {loading ? <Loading /> : data && <HouseholdForm settings={data} />}
+      {loading ? <Loading /> : data && <HoardForm settings={data} />}
     </Panel>
   );
 }
-function HouseholdForm({ settings }: { settings: any }) {
+function HoardForm({ settings }: { settings: any }) {
   const { notify, refresh } = useApp();
   const [timezone, setTimezone] = useState(
     settings.timezone || "America/New_York",
   );
-  const [name, setName] = useState(settings.household_name || "Our household");
+  const [name, setName] = useState(settings.household_name || "Our hoard");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   async function save(e: React.FormEvent) {
@@ -644,7 +644,7 @@ function HouseholdForm({ settings }: { settings: any }) {
           revision: settings.revision,
         }),
       });
-      notify("Household settings saved.");
+      notify("Hoard settings saved.");
       refresh();
     } catch (e) {
       setError(errorMessage(e));
@@ -656,7 +656,7 @@ function HouseholdForm({ settings }: { settings: any }) {
     <form onSubmit={save}>
       <div className="panel-body">
         <div className="form-grid">
-          <Field label="Household name">
+          <Field label="Hoard name">
             <input
               required
               value={name}
@@ -744,7 +744,7 @@ function Backups() {
               </div>
             </div>
             <p className="muted">
-              Weekly backups run on Sunday at 03:00 in your configured household
+              Weekly backups run on Sunday at 03:00 in your configured hoard
               timezone. Each verified snapshot includes the SQLite database and
               uploaded files. Backups are stored on this machine.
             </p>

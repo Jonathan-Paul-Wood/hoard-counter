@@ -235,7 +235,7 @@ export function Stat({
   );
 }
 export function PageHead({
-  eyebrow = "YOUR HOUSEHOLD",
+  eyebrow = "YOUR HOARD",
   title,
   subtitle,
   action,
@@ -443,7 +443,7 @@ export function TrendChart({
         role="img"
         aria-label={
           projection
-            ? "Projected household net worth over time"
+            ? "Projected hoard net worth over time"
             : "Monthly income and expenses bar chart"
         }
       >

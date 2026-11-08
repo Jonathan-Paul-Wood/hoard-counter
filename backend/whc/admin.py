@@ -1,4 +1,4 @@
-"""Household administration and audit views."""
+"""Hoard administration and audit views."""
 from __future__ import annotations
 
 import json
@@ -125,7 +125,7 @@ def audit():
 
 def settings_dict():
     record = db.session.scalar(db.select(Record).where(Record.kind == 'setting', Record.deleted.is_(False)))
-    return {**dict(household_name='Our household', timezone=current_app.config.get('HOUSEHOLD_TIMEZONE', 'America/New_York')), **(record.data if record else {}), 'default_currency': 'USD', 'version': os.environ.get('APP_VERSION', '1.0.0')}
+    return {**dict(household_name='Our hoard', timezone=current_app.config.get('HOUSEHOLD_TIMEZONE', 'America/New_York')), **(record.data if record else {}), 'default_currency': 'USD', 'version': os.environ.get('APP_VERSION', '1.0.0')}
 
 
 @bp.get('/settings')
@@ -141,10 +141,10 @@ def update_settings():
     if not isinstance(body, dict):
         raise ValueError('Provide a settings object.')
     if any(k not in ('household_name', 'timezone') for k in body):
-        raise ValueError('Only household name and timezone can be updated.')
+        raise ValueError('Only hoard name and timezone can be updated.')
     data = {**settings_dict(), **body}
     if not isinstance(data['household_name'], str) or not data['household_name'].strip() or len(data['household_name']) > 100:
-        raise ValueError('Enter a household name of at most 100 characters.')
+        raise ValueError('Enter a hoard name of at most 100 characters.')
     data['household_name'] = data['household_name'].strip()
     if not isinstance(data['timezone'], str):
         raise ValueError('Select a valid IANA timezone.')
