@@ -2,7 +2,7 @@
 
 ## Automated coverage
 
-Run `.venv/bin/python -m pytest backend/tests -q` from the repository root. The suite uses isolated temporary databases and upload directories.
+Run the backend test command for your shell from the repository root (see [Validation and API](../README.md#validation-and-api)). The suite uses isolated temporary databases and upload directories.
 
 | Area | Evidence |
 | --- | --- |
@@ -15,7 +15,7 @@ Run `.venv/bin/python -m pytest backend/tests -q` from the repository root. The 
 | OpenAPI route coverage, schema references and generated TypeScript parity | `backend/tests/test_contract.py` |
 | Docker bootstrap/restart preservation, refusal of unsafe migrations, direct HTTP login/CSRF, and optional Secure cookies | `backend/tests/test_docker_startup.py` |
 
-Run `pnpm test`, `pnpm typecheck`, and `pnpm build` from `frontend/`. Formatter tests cover exact decimal rounding, large values, negative balances, cryptocurrency precision, and exact aggregation. The production build includes a standalone server and static assets.
+Run the frontend validation commands for your shell (see [Validation and API](../README.md#validation-and-api)). Formatter tests cover exact decimal rounding, large values, negative balances, cryptocurrency precision, and exact aggregation. The production build includes a standalone server and static assets.
 
 ## Checks performed during implementation
 

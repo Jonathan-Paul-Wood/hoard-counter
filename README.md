@@ -32,6 +32,45 @@ Use the [managed upgrade procedure](docs/operations.md#releases-and-rollback) fo
 
 Python 3.11+ and Node.js 22+ are required. Use disposable development data and a different secret from production.
 
+Start in the repository root and use the commands for your shell. Keep separate virtual environments if you switch between Windows and WSL: a Linux virtual environment cannot run with Windows Python.
+
+### Windows PowerShell
+
+These commands run the virtual environment's Python directly, so no activation script is needed.
+
+```powershell
+py -3 -m venv .venv-windows
+.\.venv-windows\Scripts\python.exe -m pip install -r backend\requirements.txt
+$env:DATA_DIR = Join-Path $PWD 'data'
+$env:UPLOAD_DIR = Join-Path $PWD 'uploads'
+$env:BACKUP_DIR = Join-Path $PWD 'backups'
+$env:SECRET_KEY = .\.venv-windows\Scripts\python.exe -c "import secrets; print(secrets.token_hex(32))"
+$env:COOKIE_SECURE = 'false'
+cd backend
+..\.venv-windows\Scripts\python.exe -m alembic upgrade head
+..\.venv-windows\Scripts\python.exe -m flask --app whc:create_app run --host 127.0.0.1 --port 5000
+```
+
+### Windows Command Prompt
+
+```bat
+py -3 -m venv .venv-windows
+.venv-windows\Scripts\activate.bat
+python -m pip install -r backend\requirements.txt
+set "DATA_DIR=%CD%\data"
+set "UPLOAD_DIR=%CD%\uploads"
+set "BACKUP_DIR=%CD%\backups"
+for /f %K in ('python -c "import secrets; print(secrets.token_hex(32))"') do set "SECRET_KEY=%K"
+set "COOKIE_SECURE=false"
+cd backend
+python -m alembic upgrade head
+python -m flask --app whc:create_app run --host 127.0.0.1 --port 5000
+```
+
+If the Windows Python launcher (`py`) is unavailable but `python --version` reports Python 3.11 or newer, use `python -m venv .venv-windows` instead.
+
+### Linux, macOS, or WSL
+
 ```sh
 python3 -m venv .venv
 . .venv/bin/activate
@@ -46,27 +85,43 @@ alembic upgrade head
 flask --app whc:create_app run --host 127.0.0.1 --port 5000
 ```
 
-In another terminal:
+### Frontend
+
+Open a second terminal at the repository root. These commands work in Windows Command Prompt, PowerShell, Linux, macOS, and WSL.
 
 ```sh
 cd frontend
-corepack enable
-corepack prepare pnpm@11.23.0 --activate
-pnpm install --frozen-lockfile
-pnpm dev
+npm exec --yes -- pnpm@11.23.0 install --frozen-lockfile
+npm exec --yes -- pnpm@11.23.0 dev
 ```
+
+If PowerShell blocks `npm.ps1`, use `npm.cmd` in place of `npm` in the frontend commands.
 
 Open `http://127.0.0.1:3000`. The development frontend forwards API requests to Flask. Financial state stays in the directories above across frontend/backend restarts. The cookie setting follows the access protocol: `COOKIE_SECURE=false` for HTTP, `true` for HTTPS.
 
 ## Validation and API
 
+From the repository root on Windows:
+
+```bat
+.\.venv-windows\Scripts\python.exe -m pytest backend/tests -q
+.\.venv-windows\Scripts\python.exe backend/tools/generate_contract.py
+```
+
+On Linux, macOS, or WSL:
+
 ```sh
 .venv/bin/python -m pytest backend/tests -q
 .venv/bin/python backend/tools/generate_contract.py
+```
+
+To validate the frontend from the repository root:
+
+```sh
 cd frontend
-pnpm test
-pnpm typecheck
-pnpm build
+npm exec --yes -- pnpm@11.23.0 test
+npm exec --yes -- pnpm@11.23.0 typecheck
+npm exec --yes -- pnpm@11.23.0 build
 ```
 
 The committed [OpenAPI contract](openapi.json) is served at `/api/v1/openapi.json` after login. Its TypeScript interfaces are generated into `frontend/lib/generated.ts`. Money travels as decimal strings; mutations require `X-CSRF-Token`, and edits/voids require the revision the caller last read.
