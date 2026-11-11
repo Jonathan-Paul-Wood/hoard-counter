@@ -42,6 +42,16 @@ CSV exports contain user-entered accounts or ordinary transactions. A complete Z
 
 Imports first validate and simulate their complete effects. Review changes, rule effects, and conflicts before committing. Previews belong to the requesting user, expire after 30 minutes, and become stale when the ledger changes. Archive imports preserve classifications; new CSV transactions run creation rules. Commits are atomic for the database, and uploaded attachment filenames are immutable.
 
+### Firefly Import
+
+In Settings, choose **Firefly Import** and upload Firefly III's native UTF-8 transaction CSV export. The translator follows [Firefly III's export format](https://github.com/firefly-iii/firefly-iii/blob/main/app/Support/Export/ExportDataGenerator.php). Create financial accounts in Hoard Counter first, using the same names and currencies. Names match without regard to case; duplicate matches must be resolved. Firefly's generic asset account type cannot determine the appropriate Hoard financial account type.
+
+Withdrawals become positive Expenses, Deposits become positive Income, and Transfers remain positive Transfers. A Deposit from an expense account becomes an Expense refund. The exported source and destination determine the direction; Firefly's negative Withdrawal amounts are converted to positive magnitudes. Each split journal becomes a separate transaction. Both native amounts are retained for foreign-currency transactions; enter dated USD exchange rates in Hoard Counter before importing non-USD accounts. The exported calendar date is retained even when the CSV contains a timestamp with an offset.
+
+Matching income sources, expense payees, categories, and tags are reused; missing ones are created only on commit and are listed in the preview. Descriptions and multiline notes are preserved. The original CSV fields, including budget, bill, and external references, are retained under transaction `firefly` metadata; they do not create budgets or subscriptions. Spreadsheet formula escaping is reversed. Firefly `user_id` and `journal_id` produce stable transaction UUIDs, and `updated_at` controls replacement. Reimporting the same source row skips it, including after a manual Hoard edit; changed rows follow the normal timestamp conflict rules. Use this importer for one Firefly installation, since independent installations may reuse user/journal IDs.
+
+Opening balance, Reconciliation, and Liability credit rows are not ordinary transactions in Hoard Counter. Enter opening balances and reconciliations separately and remove those rows from this transaction CSV. Unsupported types, missing or ambiguous accounts, duplicate journal IDs, and malformed values block the import with an actionable row error; no records are partially committed. Firefly has no native Return transaction type, so Deposits are not inferred to be investment Returns.
+
 ## Reports and history
 
 Screen, CSV, and PDF transaction summaries share the same backend calculations. Transaction filters apply to cash-flow summaries and transaction detail. Account/type/currency filters also restrict account balances. Category/tag/subscription filters do not allocate balances to categories. Monthly budget comparisons explicitly use complete calendar months; audit sections use the dates changes were recorded, which can differ from transaction dates.

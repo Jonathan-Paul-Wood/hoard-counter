@@ -395,6 +395,7 @@ function DataExchange() {
                   }}
                 >
                   <option value="transactions">Transactions CSV</option>
+                  <option value="firefly">Firefly Import</option>
                   <option value="accounts">Accounts CSV</option>
                   <option value="archive">Complete archive ZIP</option>
                 </select>
@@ -416,9 +417,23 @@ function DataExchange() {
               </Button>
             </div>
             <p className="muted small">
-              UUIDs keep imports idempotent. A newer modification date replaces
-              the whole record; conflicts are surfaced for review. Exports also
-              serve as import templates.
+              {kind === "firefly" ? (
+                <>
+                  Upload Firefly III’s native transaction CSV export. Create
+                  financial accounts with matching names and currencies first.
+                  Withdrawals become Expenses, Deposits become Income, and
+                  Transfers stay Transfers. Payees, categories, and tags are
+                  included in the preview. Firefly journal IDs prevent
+                  duplicates. Enter opening balances and reconciliations
+                  separately and exclude those rows from this CSV.
+                </>
+              ) : (
+                <>
+                  UUIDs keep imports idempotent. A newer modification date
+                  replaces the whole record; conflicts are surfaced for review.
+                  Exports also serve as import templates.
+                </>
+              )}
             </p>
             <ErrorBox error={error} />
           </div>

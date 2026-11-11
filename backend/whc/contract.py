@@ -133,7 +133,7 @@ def specification():
         paths['/' + route] = {'post': operation(route, request_schema=schema, method='post')}
     for route, mime in [('reports/csv', 'text/csv'), ('reports/pdf', 'application/pdf'), ('exports', 'application/zip')]:
         paths['/' + route] = {'get': {'summary': 'Download ' + route, 'responses': {'200': {'description': 'File download', 'content': {mime: {'schema': string(format='binary')}}}}, 'parameters': [{'name': key, 'in': 'query', 'schema': string()} for key in ('start', 'end', 'account_id', 'type', 'category_id', 'tag_id', 'subscription_id', 'currency', 'account_type', 'format')]}}
-    for route, properties in [('imports/preview', {'file': string(format='binary'), 'kind': string(enum=['accounts', 'transactions', 'archive'])}), ('attachments', {'file': string(format='binary'), 'transaction_id': ID, 'kind': string(enum=['receipt', 'item'])})]:
+    for route, properties in [('imports/preview', {'file': string(format='binary'), 'kind': string(enum=['accounts', 'transactions', 'archive', 'firefly'])}), ('attachments', {'file': string(format='binary'), 'transaction_id': ID, 'kind': string(enum=['receipt', 'item'])})]:
         op = operation(route, ref('ImportPreview' if route == 'imports/preview' else 'Attachment'), method='post', status='200' if route == 'imports/preview' else '201')
         op['requestBody'] = {'required': True, 'content': {'multipart/form-data': {'schema': obj(properties, ['file'] if route == 'imports/preview' else ['file', 'transaction_id'])}}}
         paths.setdefault('/' + route, {})['post'] = op

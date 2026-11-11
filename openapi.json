@@ -11349,7 +11349,8 @@
                     "enum": [
                       "accounts",
                       "transactions",
-                      "archive"
+                      "archive",
+                      "firefly"
                     ]
                   }
                 },

@@ -22,6 +22,7 @@ from .ledger import (save_record, list_records, add_audit, get_record, _replace_
                      system_id, rebuild_account_valuations)
 from .validation import ApiError, timestamp, identifier, amount, decimal, date_string, money
 from .files import attachment_path, identify, MAX_FILE, safe_filename
+from .firefly import parse_firefly
 
 bp = Blueprint('exchange', __name__)
 VERSION = 1
@@ -353,6 +354,11 @@ def apply_import(records, mode, actor):
             raise ValueError('The import contains the same UUID more than once.')
         seen.add(incoming['id'])
         action, existing = classify(kind, incoming)
+        if (mode == 'firefly' and kind == 'transaction' and existing and existing.kind == kind
+                and incoming.get('firefly', {}).get('fingerprint') == existing.data.get('firefly', {}).get('fingerprint')):
+            # Derived FX snapshots/rules are absent from the Firefly source row.
+            # Compare its provenance to avoid false equal-timestamp conflicts.
+            action = 'skip'
         summary[action] += 1
         change = dict(kind=kind, id=incoming['id'], action=action, description=incoming.get('description', incoming.get('name', kind)), line=entry.get('line'))
         if action == 'conflict':
@@ -371,7 +377,12 @@ def apply_import(records, mode, actor):
                     raise ValueError('Special records require a full archive.')
                 record = import_special(kind, incoming, existing, actor)
             else:
-                record = save_record(kind, incoming, actor, record_id=incoming['id'], expected_revision=existing.revision if existing else None, origin='import', apply_rules=mode != 'archive', preserve_modified=True)
+                try:
+                    record = save_record(kind, incoming, actor, record_id=incoming['id'], expected_revision=existing.revision if existing else None, origin='import', apply_rules=mode != 'archive', preserve_modified=True)
+                except (ApiError, ValueError) as exc:
+                    if mode == 'firefly':
+                        raise ValueError(f'Firefly CSV row {entry.get("line")}: {exc}') from exc
+                    raise
             change['after'] = record.to_dict()
         changes.append(change)
     db.session.flush()
@@ -383,8 +394,8 @@ def apply_import(records, mode, actor):
 def preview():
     file = request.files.get('file')
     mode = request.form.get('kind', 'archive')
-    if not file or mode not in ('accounts', 'transactions', 'archive'):
-        raise ValueError('Select an accounts CSV, transactions CSV, or full archive.')
+    if not file or mode not in ('accounts', 'transactions', 'archive', 'firefly'):
+        raise ValueError('Select an accounts CSV, transactions CSV, Firefly Import CSV, or full archive.')
     payload = file.read(LIMIT + 1)
     if len(payload) > LIMIT:
         raise ValueError('Imports must be 100 MiB or smaller.')
@@ -392,7 +403,11 @@ def preview():
     staging = Path(current_app.config['DATA_DIR']) / 'imports' / token
     staging.mkdir(parents=True, exist_ok=True)
     try:
-        records, files, audit = (parse_archive(payload, staging) if mode == 'archive' else (parse_csv(payload, mode[:-1]), {}, []))
+        if mode == 'archive':
+            records, files, audit = parse_archive(payload, staging)
+        else:
+            records = parse_firefly(payload) if mode == 'firefly' else parse_csv(payload, mode[:-1])
+            files, audit = {}, []
         normalize_records(records)
     except (BadZipFile, RuntimeError, NotImplementedError) as error:
         shutil.rmtree(staging)
