@@ -29,6 +29,7 @@ services:
     environment:
       APP_VERSION: ${APP_VERSION}
       DATABASE_URL: sqlite:////data/hoardcounter.db
+      MANAGED_MIGRATIONS: "true"
       DATA_DIR: /data
       UPLOAD_DIR: /uploads
       BACKUP_DIR: /backups

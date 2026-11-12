@@ -59,7 +59,7 @@ Every release must use a new immutable tag. Keep the previous images available u
 sudo python3 scripts/manage.py deploy --version 1.1.0
 ```
 
-The command builds while the previous version continues serving. It then enters a brief maintenance window, creates and verifies a complete pre-upgrade snapshot, stops the old API, runs `alembic upgrade head` from the new image, and waits for both new services to become healthy. Only then does it update the active release and reopen access. Database creation is not repeated on container startup.
+The command builds while the previous version continues serving. It then enters a brief maintenance window, creates and verifies a complete pre-upgrade snapshot, stops the old API, runs `alembic upgrade head` from the new image, and waits for both new services to become healthy. Only then does it update the active release and reopen access. The Compose API checks that the schema is current on startup and leaves upgrades to the deployment manager so they always have a recovery path.
 
 After a successful managed upgrade or restore, set `APP_VERSION` in `.env` to the active version shown by `scripts/manage.py status` before running direct Compose commands. The manager uses the explicit release tag and does not rewrite `.env`.
 
@@ -77,6 +77,14 @@ sudo python3 scripts/manage.py deploy --version 1.1.0 --pull
 ```
 
 Ordinary rebuilds/recreates leave the bind-mounted records intact. Never delete the host storage directories when replacing images. Do not run a migration manually against a live API. Retain adequate free disk space for a database table rebuild, the full snapshot, and backup staging.
+
+### Adding database migrations
+
+From `backend/`, run `python -m alembic revision -m "describe the change"`. Commit the script in `backend/migrations/versions/` as `yyyy-mm-dd-hh-mm-ssss-short-slug.py`. Alembic generates a UTC timestamp (the final four digits are seconds and hundredths, defaulting to `00` hundredths); change any underscores in the generated slug to hyphens. Implement `upgrade()` using Alembic operations and keep it inside the database transaction. Avoid explicit commits, autocommit operations, and changes to files or external services.
+
+Keep one Alembic revision chain. If concurrent changes add migrations from the same parent, resolve the branch before shipping. Revision dependencies control execution order; a timestamp by itself cannot tell whether a migration ran. Keep applied scripts and their filenames unchanged, and correct a shipped migration with a new revision. To roll back a release, restore the matching database backup and application version.
+
+The `"migration-runs"` table records each successful upgrade with its UUID, filename, filename timestamp, and UTC execution time. The original `0001_initial` revision predates the audit table and is tracked only in Alembic's history. For SQLite, the pending migrations, revision updates, and audit inserts commit together. If a migration fails, startup stops and the transaction rolls back; fix the failure before restarting.
 
 ## Weekly backup schedule
 

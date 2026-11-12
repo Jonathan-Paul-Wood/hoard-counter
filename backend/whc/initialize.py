@@ -8,8 +8,8 @@ import sqlite3
 import subprocess
 import sys
 
-from . import SCHEMA_REVISION
 from .backup import mutation_lock
+from .migrations import schema_head
 
 UID = 10001
 BACKEND = Path(__file__).resolve().parents[1]
@@ -67,6 +67,7 @@ def initialize(root, release):
     root = Path(root)
     root.mkdir(parents=True, exist_ok=True)
     with operations_lock(root):
+        expected_revision = schema_head()
         for name in ('data', 'uploads', 'backups'):
             directory = root / name
             if directory.is_symlink():
@@ -85,13 +86,13 @@ def initialize(root, release):
             state = json.loads(state_path.read_text())
             if state.get('version') != release:
                 raise RuntimeError('A different release is installed. Use scripts/manage.py deploy for a backed-up upgrade.')
-            if not database.is_file() or schema(database) != SCHEMA_REVISION:
+            if not database.is_file() or schema(database) != expected_revision:
                 raise RuntimeError('Installed schema does not match this image. Use managed deployment or restore.')
             return
         if database.exists():
             raise RuntimeError('Existing untracked database: restore its matching release; bootstrap will not modify it.')
         migrate(root / 'data')
-        if schema(database) != SCHEMA_REVISION:
+        if schema(database) != expected_revision:
             raise RuntimeError('Initialization did not produce the expected schema.')
         temporary = root / '.release.json.partial'
         temporary.write_text(json.dumps(dict(version=release, previous_version=None, rollback_backup=None), indent=2) + '\n')

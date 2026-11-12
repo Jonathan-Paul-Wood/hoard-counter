@@ -27,6 +27,14 @@ def sqlite_settings(connection, _):
         cursor.close()
 
 
+class MigrationRun(db.Model):
+    __tablename__ = "migration-runs"
+    id = db.Column(db.String(36), primary_key=True)
+    migration_file = db.Column(db.String(), nullable=False, unique=True)
+    migration_date = db.Column(db.String(21), nullable=False)
+    run_on = db.Column(db.String(27), nullable=False)
+
+
 class Record(db.Model):
     __tablename__ = "records"
     id = db.Column(db.String(36), primary_key=True, default=new_id)

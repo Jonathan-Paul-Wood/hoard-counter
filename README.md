@@ -47,7 +47,6 @@ $env:BACKUP_DIR = Join-Path $PWD 'backups'
 $env:SECRET_KEY = .\.venv-windows\Scripts\python.exe -c "import secrets; print(secrets.token_hex(32))"
 $env:COOKIE_SECURE = 'false'
 cd backend
-..\.venv-windows\Scripts\python.exe -m alembic upgrade head
 ..\.venv-windows\Scripts\python.exe -m flask --app whc:create_app run --host 127.0.0.1 --port 5000
 ```
 
@@ -63,7 +62,6 @@ set "BACKUP_DIR=%CD%\backups"
 for /f %K in ('python -c "import secrets; print(secrets.token_hex(32))"') do set "SECRET_KEY=%K"
 set "COOKIE_SECURE=false"
 cd backend
-python -m alembic upgrade head
 python -m flask --app whc:create_app run --host 127.0.0.1 --port 5000
 ```
 
@@ -81,7 +79,6 @@ export BACKUP_DIR="$PWD/backups"
 export SECRET_KEY="$(python -c 'import secrets; print(secrets.token_hex(32))')"
 export COOKIE_SECURE=false
 cd backend
-alembic upgrade head
 flask --app whc:create_app run --host 127.0.0.1 --port 5000
 ```
 
@@ -98,6 +95,8 @@ npm exec --yes -- pnpm@11.23.0 dev
 If PowerShell blocks `npm.ps1`, use `npm.cmd` in place of `npm` in the frontend commands.
 
 Open `http://127.0.0.1:3000`. The development frontend forwards API requests to Flask. Financial state stays in the directories above across frontend/backend restarts. The cookie setting follows the access protocol: `COOKIE_SECURE=false` for HTTP, `true` for HTTPS.
+
+After pulling changes, restart the local backend. It applies any pending database migrations before serving requests. See [adding database migrations](docs/operations.md#adding-database-migrations).
 
 ## Validation and API
 

@@ -15,4 +15,4 @@ def upgrade():
     ${upgrades if upgrades else "pass"}
 
 def downgrade():
-    ${downgrades if downgrades else "pass"}
+    raise RuntimeError("Destructive downgrade is disabled. Restore a verified pre-upgrade backup instead.")

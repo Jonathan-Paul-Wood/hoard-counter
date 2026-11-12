@@ -7,8 +7,9 @@ from alembic import command
 from alembic.config import Config
 import pytest
 
-from whc import create_app, SCHEMA_REVISION
+from whc import create_app
 from whc import initialize as startup
+from whc.migrations import schema_head
 from whc.models import db
 
 
@@ -29,7 +30,7 @@ def storage(tmp_path, monkeypatch):
 def test_bootstrap_initializes_once_and_preserves_existing_records(storage, monkeypatch):
     startup.initialize(storage, '1.0.0')
     database = storage / 'data/hoardcounter.db'
-    assert startup.schema(database) == SCHEMA_REVISION
+    assert startup.schema(database) == schema_head()
     assert json.loads((storage / 'release.json').read_text())['version'] == '1.0.0'
     with sqlite3.connect(database) as connection:
         connection.execute("UPDATE records SET revision=7 WHERE kind='account'")

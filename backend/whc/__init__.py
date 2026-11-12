@@ -15,9 +15,8 @@ from werkzeug.security import generate_password_hash
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from .models import db, User, Record
+from .migrations import prepare_database, schema_head
 from .validation import ApiError
-
-SCHEMA_REVISION = "0001_initial"
 
 
 def create_app(config=None):
@@ -30,6 +29,7 @@ def create_app(config=None):
         DATA_DIR=str(data_dir), UPLOAD_DIR=os.environ.get("UPLOAD_DIR", str(data_dir / "uploads")),
         BACKUP_DIR=os.environ.get("BACKUP_DIR", str(data_dir / "backups")),
         DATABASE_URL=os.environ.get("DATABASE_URL", "sqlite:///" + str(data_dir / "hoardcounter.db").replace("\\", "/")),
+        MANAGED_MIGRATIONS=os.environ.get("MANAGED_MIGRATIONS", "false").lower() == "true",
         SECRET_KEY=os.environ.get("SECRET_KEY"), COOKIE_SECURE=os.environ.get("COOKIE_SECURE", "false").lower() == "true",
         HOUSEHOLD_TIMEZONE=os.environ.get("HOUSEHOLD_TIMEZONE", "America/New_York"),
         MAX_CONTENT_LENGTH=100 * 1024 * 1024,
@@ -49,6 +49,10 @@ def create_app(config=None):
     for path in (app.config["DATA_DIR"], app.config["UPLOAD_DIR"], app.config["BACKUP_DIR"]):
         Path(path).mkdir(parents=True, exist_ok=True)
     db.init_app(app)
+    expected_revision = schema_head()
+    if not app.config.get("TESTING"):
+        with app.app_context():
+            prepare_database(db.engine, managed=app.config["MANAGED_MIGRATIONS"])
     from .auth import bp as auth_bp
     from .resources import bp as resources_bp
     app.register_blueprint(auth_bp, url_prefix="/api/v1")
@@ -147,9 +151,9 @@ def create_app(config=None):
             db.session.execute(text("SELECT 1 FROM records LIMIT 1"))
             if not app.config.get("TESTING"):
                 revision = db.session.execute(text("SELECT version_num FROM alembic_version")).scalar()
-                if revision != SCHEMA_REVISION:
+                if revision != expected_revision:
                     return jsonify(status="unhealthy", reason="migration_required"), 503
-            return jsonify(status="ok", schema=SCHEMA_REVISION)
+            return jsonify(status="ok", schema=expected_revision)
         except Exception:
             db.session.rollback()
             return jsonify(status="unhealthy", reason="database_unavailable"), 503
