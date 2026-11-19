@@ -881,7 +881,6 @@ export function Accounts() {
             <Stat
               label="Total assets"
               value={money(asset)}
-              accent
               icon={<Landmark size={19} />}
             />
             <Stat
@@ -891,6 +890,7 @@ export function Accounts() {
             />
             <Stat
               label="Net worth"
+              accent
               value={money(
                 decimalSum([
                   asset,
