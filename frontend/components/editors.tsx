@@ -444,7 +444,7 @@ export function TransactionEditor({
             </Field>
             <Field
               label={
-                values.type === "Return" ? "Investment account" : "From account"
+                values.type === "Return" ? "Asset or investment account" : "From account"
               }
             >
               <select

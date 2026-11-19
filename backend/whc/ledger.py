@@ -128,6 +128,10 @@ def has_ledger_history(history):
 
 def _validate_account(data, existing, preserve_snapshots=False):
     required_text(data, "name", 160)
+    description = data.get("description")
+    if description is not None and (not isinstance(description, str) or len(description) > 10000):
+        raise ApiError("description must be text with at most 10000 characters")
+    data["description"] = description.strip() if description else ""
     number = data.get("account_number")
     if number is not None and (not isinstance(number, str) or len(number) > 160):
         raise ApiError("account_number must be text with at most 160 characters")

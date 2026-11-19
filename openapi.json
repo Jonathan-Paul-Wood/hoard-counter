@@ -624,6 +624,10 @@
                       }
                     ]
                   },
+                  "description": {
+                    "type": "string",
+                    "maxLength": 10000
+                  },
                   "opening_currency": {
                     "type": "string",
                     "description": "Currency of the opening amount; preserved when existing currencies are kept."
@@ -12804,6 +12808,10 @@
               }
             ]
           },
+          "description": {
+            "type": "string",
+            "maxLength": 10000
+          },
           "opening_currency": {
             "type": "string",
             "description": "Currency of the opening amount; preserved when existing currencies are kept."
@@ -14454,6 +14462,10 @@
                 "type": "null"
               }
             ]
+          },
+          "description": {
+            "type": "string",
+            "maxLength": 10000
           },
           "opening_currency": {
             "type": "string",

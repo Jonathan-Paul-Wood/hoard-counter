@@ -70,6 +70,7 @@ SCHEMAS.update({
 })
 SCHEMAS['Credentials']['properties']['username'] = string(minLength=1, maxLength=80)
 SCHEMAS['Account']['properties']['account_number'] = {'anyOf': [string(maxLength=160), {'type': 'null'}]}
+SCHEMAS['Account']['properties']['description'] = string(maxLength=10000)
 SCHEMAS['Account']['properties']['opening_currency'] = string(description='Currency of the opening amount; preserved when existing currencies are kept.')
 SCHEMAS['Transaction']['properties']['currency'] = string(description='Defaults to the source account currency on creation.')
 SCHEMAS['Transaction']['properties']['destination_currency'] = string(description='Defaults to the destination account currency; Returns use the transaction currency.')

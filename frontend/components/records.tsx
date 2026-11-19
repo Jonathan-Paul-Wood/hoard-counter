@@ -79,6 +79,7 @@ export function useFields(resource: string): FieldSpec[] {
   const specs: Record<string, FieldSpec[]> = {
     accounts: [
       { name: "name", label: "Account name", required: true, wide: true },
+      { name: "description", label: "Description", type: "textarea", wide: true },
       {
         name: "account_number",
         label: "Account number (optional)",
@@ -93,6 +94,7 @@ export function useFields(resource: string): FieldSpec[] {
         default: "Checking",
         options: (
           meta?.account_types || [
+            "Asset",
             "Checking",
             "Savings",
             "Brokerage",
@@ -125,7 +127,7 @@ export function useFields(resource: string): FieldSpec[] {
             value: v,
             label:
               {
-                asset: "Asset — money you own",
+                asset: "Asset — money or property you own",
                 liability: "Liability — money you owe",
                 income: "Income — salary or earnings source",
                 expense: "Expense — merchant or payee",
@@ -785,7 +787,7 @@ export function Accounts() {
     (a: Entity) =>
       ["asset", "liability"].includes(a.account_class) &&
       (!typeFilter || a.type === typeFilter) &&
-      `${a.name} ${a.account_number || ""}`
+      `${a.name} ${a.account_number || ""} ${a.description || ""}`
         .toLowerCase()
         .includes(search.toLowerCase()),
   );
@@ -805,7 +807,7 @@ export function Accounts() {
         ? ["asset", "liability"].includes(a.account_class)
         : !["asset", "liability"].includes(a.account_class)) &&
       (!typeFilter || a.type === typeFilter) &&
-      `${a.name} ${a.account_number || ""}`
+      `${a.name} ${a.account_number || ""} ${a.description || ""}`
         .toLowerCase()
         .includes(search.toLowerCase()),
   );
@@ -838,6 +840,9 @@ export function Accounts() {
               )
             }
           />
+          {selected.description && (
+            <p style={{ whiteSpace: "pre-wrap" }}>{selected.description}</p>
+          )}
           <div className="stats three">
             <Stat
               label={

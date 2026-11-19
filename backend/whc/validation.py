@@ -21,9 +21,9 @@ CURRENCIES = {
     "KRW": ("South Korean Won", 0), "MXN": ("Mexican Peso", 2),
     "BRL": ("Brazilian Real", 2), "ZAR": ("South African Rand", 2),
 }
-ASSET_TYPES = ["Checking", "Savings", "Brokerage", "Roth IRA", "Traditional IRA", "Roth 401K", "Traditional 401K", "HSA", "FSA", "529", "Wallet", "Crypto Cold Wallet"]
+ASSET_TYPES = ["Asset", "Checking", "Savings", "Brokerage", "Roth IRA", "Traditional IRA", "Roth 401K", "Traditional 401K", "HSA", "FSA", "529", "Wallet", "Crypto Cold Wallet"]
 LIABILITY_TYPES = ["Credit Card", "Loan", "Mortgage", "Debt"]
-INVESTMENT_TYPES = ["Brokerage", "Roth IRA", "Traditional IRA", "Roth 401K", "Traditional 401K", "HSA", "FSA", "529", "Crypto Cold Wallet"]
+INVESTMENT_TYPES = ["Asset", "Brokerage", "Roth IRA", "Traditional IRA", "Roth 401K", "Traditional 401K", "HSA", "FSA", "529", "Crypto Cold Wallet"]
 ACCOUNT_TYPES = ASSET_TYPES + LIABILITY_TYPES + ["Income Source", "Expense Payee", "Equity"]
 TRANSACTION_TYPES = ["Income", "Expense", "Transfer", "Return"]
 

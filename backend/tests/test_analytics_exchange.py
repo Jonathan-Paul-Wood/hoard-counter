@@ -186,13 +186,29 @@ def test_stale_preview_rejected(household):
     assert response.status_code == 409
 
 
+def test_generic_asset_returns_contribute_to_net_worth(household):
+    app, client, headers, create, account, category = household
+    home = create('accounts', {'name': 'Home', 'type': 'Asset', 'opening_balance': '400000', 'opening_date': '2024-01-01'})
+    assert home['account_class'] == 'asset'
+    for amount in ('20000', '-5000'):
+        create('transactions', {'type': 'Return', 'source_account_id': home['id'], 'destination_account_id': home['id'], 'amount': amount, 'date': '2024-02-01', 'description': 'Home valuation change'})
+    assert Decimal(client.get('/api/v1/accounts/' + home['id']).json['balance']) == 415000
+    summary = client.get('/api/v1/dashboard?start=2024-01-01&end=2024-12-31').json
+    assert Decimal(summary['assets']) == 416000
+    assert Decimal(summary['net_worth']) == 416000
+    rejected = client.post('/api/v1/transactions', headers=headers, json={'type': 'Return', 'source_account_id': home['id'], 'destination_account_id': account['id'], 'amount': '10', 'date': '2024-02-01', 'description': 'Invalid return'})
+    assert rejected.status_code == 400
+
+
 def test_account_number_search_and_csv_roundtrip(household):
     app, client, headers, create, account, category = household
-    numbered = create('accounts', {'name': 'Numbered', 'type': 'Savings', 'account_number': '001234'})
+    numbered = create('accounts', {'name': 'Numbered', 'type': 'Asset', 'account_number': '001234', 'description': '=Property, with a garden\nEstimated value'})
     assert [row['id'] for row in client.get('/api/v1/accounts?q=001234').json['items']] == [numbered['id']]
     exported = client.get('/api/v1/exports?format=accounts')
     rows = list(csv.DictReader(io.StringIO(exported.data.decode('utf-8-sig'))))
     assert next(row for row in rows if row['id'] == numbered['id'])['account_number'] == '001234'
+    assert next(row for row in rows if row['id'] == numbered['id'])['description'] == "'=Property, with a garden\nEstimated value"
+    assert [row['id'] for row in client.get('/api/v1/accounts?q=garden').json['items']] == [numbered['id']]
     preview = client.post('/api/v1/imports/preview', headers=headers, data={'kind': 'accounts', 'file': (io.BytesIO(exported.data), 'accounts.csv')}).json
     assert not preview['errors'] and not preview['conflicts'], preview
     assert preview['summary']['skip'] == len(rows)

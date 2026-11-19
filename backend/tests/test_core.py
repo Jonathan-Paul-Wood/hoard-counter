@@ -90,6 +90,18 @@ def test_account_number_preserves_leading_zeros_and_validates(app):
         save_record("account", {"name": "Invalid", "type": "Checking", "account_number": 1234}, None)
 
 
+def test_optional_account_description(app):
+    saved = save_record("account", {"name": "Home", "type": "Asset", "description": " Primary residence\nEstimated market value "}, None)
+    assert saved.data["description"] == "Primary residence\nEstimated market value"
+    saved = save_record("account", {"name": "House"}, None, saved.id, saved.revision)
+    assert saved.data["description"] == "Primary residence\nEstimated market value"
+    saved = save_record("account", {"description": ""}, None, saved.id, saved.revision)
+    assert saved.data["description"] == ""
+    for invalid in (123, False, [], "x" * 10001):
+        with pytest.raises(ApiError, match="description must be text"):
+            save_record("account", {"description": invalid}, None, saved.id, saved.revision)
+
+
 def test_account_type_can_change_within_class_after_transactions(app):
     checking, savings = account(), account("Savings", "0", typ="Savings")
     transaction(checking.id, savings.id)
