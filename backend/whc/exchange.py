@@ -20,7 +20,7 @@ from .auth import login_required
 from .models import db, Record, AuditEvent, utcnow
 from .ledger import (save_record, list_records, add_audit, get_record, _replace_postings,
                      system_id, rebuild_account_valuations)
-from .validation import ApiError, timestamp, identifier, amount, decimal, date_string, money
+from .validation import ApiError, timestamp, identifier, amount, decimal, date_string, money, currency_code
 from .files import attachment_path, identify, MAX_FILE, safe_filename
 from .firefly import parse_firefly
 
@@ -28,8 +28,8 @@ bp = Blueprint('exchange', __name__)
 VERSION = 1
 LIMIT = 100 * 1024 * 1024
 ORDER = ['currency', 'rate', 'category', 'tag', 'account', 'subscription', 'rule', 'budget', 'transaction', 'valuation', 'scenario', 'attachment', 'setting']
-ACCOUNT_FIELDS = ['id', 'name', 'type', 'account_class', 'currency', 'opening_balance', 'opening_date', 'balance', 'last_modified', 'deleted']
-TRANSACTION_FIELDS = ['id', 'type', 'source_account_id', 'destination_account_id', 'date', 'amount', 'destination_amount', 'description', 'category_id', 'tag_ids', 'notes', 'subscription_id', 'subscription_date', 'is_refund', 'investment_fee', 'last_modified', 'deleted']
+ACCOUNT_FIELDS = ['id', 'name', 'account_number', 'type', 'account_class', 'currency', 'opening_balance', 'opening_currency', 'opening_date', 'balance', 'last_modified', 'deleted']
+TRANSACTION_FIELDS = ['id', 'type', 'source_account_id', 'destination_account_id', 'date', 'amount', 'currency', 'destination_amount', 'destination_currency', 'description', 'category_id', 'tag_ids', 'notes', 'subscription_id', 'subscription_date', 'is_refund', 'investment_fee', 'last_modified', 'deleted']
 READONLY = {'id', 'revision', 'last_modified', 'deleted', 'balance', 'balance_usd', 'signed_balance', 'signed_balance_usd', 'postings', 'missing_rate'}
 
 
@@ -157,7 +157,7 @@ def parse_csv(payload, kind):
                     data[field] = value.lower() in ('true', '1')
             elif field == 'tag_ids':
                 data[field] = json.loads(value or '[]')
-            elif field in ('category_id', 'subscription_id', 'subscription_date'):
+            elif field in ('category_id', 'subscription_id', 'subscription_date', 'account_number'):
                 if value or field in data:
                     data[field] = value or None
             elif value or field in data or field in ('description', 'name'):
@@ -265,8 +265,15 @@ def validate_audits(audits):
                 raise ValueError('Invalid archived audit event ' + key + '.')
 
 
-def comparable(data):
-    return {k: v for k, v in data.items() if k not in READONLY} | {'deleted': bool(data.get('deleted', False))}
+def comparable(data, kind):
+    result = {k: v for k, v in data.items() if k not in READONLY} | {'deleted': bool(data.get('deleted', False))}
+    if kind == 'account':
+        result.setdefault('account_number', None)
+        result.setdefault('opening_currency', data.get('currency', 'USD'))
+    if kind == 'transaction' and data.get('system') == 'reconciliation' and not data.get('currency'):
+        account = get_record('account', data['account_id'], include_deleted=True)
+        result['currency'] = account.data['currency']
+    return result
 
 
 def classify(kind, data):
@@ -281,7 +288,7 @@ def classify(kind, data):
     if changed < existing.last_modified:
         return 'skip', existing
     if changed == existing.last_modified:
-        return ('skip' if comparable(data) == comparable(existing.to_dict()) else 'conflict'), existing
+        return ('skip' if comparable(data, kind) == comparable(existing.to_dict(), kind) else 'conflict'), existing
     return 'update', existing
 
 
@@ -315,7 +322,8 @@ def import_special(kind, data, existing, actor):
         if account.data['account_class'] not in ('asset', 'liability'):
             raise ValueError('Reconciliation applies to asset or liability accounts.')
         clean['date'] = date_string(clean['date'])
-        native = decimal(amount(clean['amount'], account.data['currency']))
+        clean['currency'] = currency_code(clean.get('currency') or account.data['currency'])
+        native = decimal(amount(clean['amount'], clean['currency']))
         rate = decimal(clean['fx_rate'])
         if rate <= 0:
             raise ValueError('Reconciliation conversion rate must be positive.')

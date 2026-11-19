@@ -76,7 +76,8 @@ def test_all_csv_report_sections_share_totals_and_preserve_audit(household):
     assert Decimal(sections['budgets'][0]['remaining']) == 75
     assert Decimal(sections['balances'][0]['balance_usd']) == 925
     assert Decimal(sections['net-worth'][0]['net_worth']) == 925
-    audit = client.get('/api/v1/reports/csv?section=audit')
+    audit_day = purchase['last_modified'][:10]
+    audit = client.get(f'/api/v1/reports/csv?section=audit&start={audit_day}&end={audit_day}')
     rows = list(csv.DictReader(io.StringIO(audit.data.decode('utf-8-sig'))))
     event = next(row for row in rows if row['record_id'] == purchase['id'])
     assert json.loads(event['after'])['amount'] == purchase['amount']
@@ -183,6 +184,89 @@ def test_stale_preview_rejected(household):
     create('tags', {'name': 'New tag'})
     response = client.post('/api/v1/imports/commit', headers=headers, json={'token': preview['token']})
     assert response.status_code == 409
+
+
+def test_account_number_search_and_csv_roundtrip(household):
+    app, client, headers, create, account, category = household
+    numbered = create('accounts', {'name': 'Numbered', 'type': 'Savings', 'account_number': '001234'})
+    assert [row['id'] for row in client.get('/api/v1/accounts?q=001234').json['items']] == [numbered['id']]
+    exported = client.get('/api/v1/exports?format=accounts')
+    rows = list(csv.DictReader(io.StringIO(exported.data.decode('utf-8-sig'))))
+    assert next(row for row in rows if row['id'] == numbered['id'])['account_number'] == '001234'
+    preview = client.post('/api/v1/imports/preview', headers=headers, data={'kind': 'accounts', 'file': (io.BytesIO(exported.data), 'accounts.csv')}).json
+    assert not preview['errors'] and not preview['conflicts'], preview
+    assert preview['summary']['skip'] == len(rows)
+
+
+def test_deleted_unused_account_survives_archive_roundtrip(household, tmp_path):
+    app, client, headers, create, account, category = household
+    unused = create('accounts', {'name': 'Unused', 'type': 'Savings', 'opening_balance': '0'})
+    removed = client.delete('/api/v1/accounts/' + unused['id'], headers=headers, json={'revision': unused['revision']})
+    assert removed.status_code == 200, removed.json
+    archive = client.get('/api/v1/exports?format=archive')
+    second_dir = tmp_path / 'second'
+    second = create_app({'TESTING': True, 'COOKIE_SECURE': False, 'DATA_DIR': str(second_dir), 'UPLOAD_DIR': str(second_dir / 'uploads'), 'BACKUP_DIR': str(second_dir / 'backups'), 'DATABASE_URL': 'sqlite:///' + str(second_dir / 'test.db')})
+    other = second.test_client()
+    other.post('/api/v1/auth/setup', json={'username': 'owner2', 'password': 'another correct long password'})
+    other_headers = {'X-CSRF-Token': other.get('/api/v1/auth/session').json['csrf_token']}
+    preview = other.post('/api/v1/imports/preview', headers=other_headers, data={'kind': 'archive', 'file': (io.BytesIO(archive.data), 'archive.zip')})
+    assert preview.status_code == 200 and not preview.json['errors'], preview.json
+    result = other.post('/api/v1/imports/commit', headers=other_headers, json={'token': preview.json['token']})
+    assert result.status_code == 200, result.json
+    assert other.get('/api/v1/accounts/' + unused['id']).status_code == 404
+
+
+def test_account_currency_change_snapshots_survive_archive_restore(household, tmp_path):
+    app, client, headers, create, account, category = household
+    rate = create('rates', {'currency': 'EUR', 'date': '2024-01-01', 'rate': '2'})
+    tx = create('transactions', expense(account, category, '100'))
+    changed = client.patch('/api/v1/accounts/' + account['id'], headers=headers, json={'currency': 'EUR', 'currency_change': 'keep', 'revision': account['revision']})
+    assert changed.status_code == 200, changed.json
+    assert Decimal(changed.json['balance']) == 450
+    client.patch('/api/v1/rates/' + rate['id'], headers=headers, json={'rate': '3', 'revision': rate['revision']})
+    archive = client.get('/api/v1/exports?format=archive')
+    second_dir = tmp_path / 'currency-restored'
+    second = create_app({'TESTING': True, 'COOKIE_SECURE': False, 'DATA_DIR': str(second_dir), 'UPLOAD_DIR': str(second_dir / 'uploads'), 'BACKUP_DIR': str(second_dir / 'backups'), 'DATABASE_URL': 'sqlite:///' + str(second_dir / 'test.db')})
+    other = second.test_client()
+    other.post('/api/v1/auth/setup', json={'username': 'owner2', 'password': 'another correct long password'})
+    other_headers = {'X-CSRF-Token': other.get('/api/v1/auth/session').json['csrf_token']}
+    preview = other.post('/api/v1/imports/preview', headers=other_headers, data={'kind': 'archive', 'file': (io.BytesIO(archive.data), 'archive.zip')})
+    assert preview.status_code == 200 and not preview.json['errors'], preview.json
+    committed = other.post('/api/v1/imports/commit', headers=other_headers, json={'token': preview.json['token']})
+    assert committed.status_code == 200, committed.json
+    assert Decimal(other.get('/api/v1/accounts/' + account['id']).json['balance']) == 450
+    assert other.get('/api/v1/transactions/' + tx['id']).json['currency'] == 'USD'
+
+
+def test_failed_account_currency_change_is_atomic(household):
+    app, client, headers, create, account, category = household
+    path = '/api/v1/accounts/' + account['id']
+    missing = client.patch(path, headers=headers, json={'currency': 'EUR', 'currency_change': 'keep', 'revision': account['revision']})
+    assert missing.status_code == 422, missing.json
+    assert client.get(path).json['currency'] == 'USD'
+    assert client.get(path).json['revision'] == account['revision']
+    create('rates', {'currency': 'JPY', 'date': '2024-01-01', 'rate': '0.01'})
+    tx = create('transactions', expense(account, category, '1.25'))
+    invalid = client.patch(path, headers=headers, json={'currency': 'JPY', 'currency_change': 'relabel', 'revision': account['revision']})
+    assert invalid.status_code == 400, invalid.json
+    unchanged = client.get(path).json
+    assert unchanged['currency'] == 'USD' and unchanged['revision'] == account['revision']
+    assert Decimal(unchanged['balance']) == Decimal('998.75')
+    assert client.get('/api/v1/transactions/' + tx['id']).json['currency'] == 'USD'
+
+
+def test_relabeling_account_updates_future_report_views(household):
+    app, client, headers, create, account, category = household
+    create('rates', {'currency': 'EUR', 'date': '2024-01-01', 'rate': '2'})
+    tx = create('transactions', expense(account, category, '100'))
+    query = '?start=2026-07-01&end=2026-07-31'
+    exported = client.get('/api/v1/reports/csv' + query).data
+    assert client.get('/api/v1/reports/data' + query).json['summary']['expenses'] == '100'
+    changed = client.patch('/api/v1/accounts/' + account['id'], headers=headers, json={'currency': 'EUR', 'currency_change': 'relabel', 'revision': account['revision']})
+    assert changed.status_code == 200, changed.json
+    assert client.get('/api/v1/reports/data' + query).json['summary']['expenses'] == '200'
+    assert client.get('/api/v1/transactions/' + tx['id']).json['amount'] == '100'
+    assert next(csv.DictReader(io.StringIO(exported.decode('utf-8-sig'))))['currency'] == 'USD'
 
 
 def test_archive_roundtrip_with_attachment_and_void(household, tmp_path):

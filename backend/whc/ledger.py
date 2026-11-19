@@ -117,29 +117,48 @@ def _reference(data, field, kind, required=False, include_deleted=False):
     return None
 
 
+def account_history(account_id):
+    return [r for r in list_records("transaction", True)
+            if account_id in (r.data.get("account_id"), r.data.get("source_account_id"), r.data.get("destination_account_id"))]
+
+
+def has_ledger_history(history):
+    return any(r.data.get("system") != "opening" or decimal(r.data.get("amount", "0")) != 0 for r in history)
+
+
 def _validate_account(data, existing, preserve_snapshots=False):
     required_text(data, "name", 160)
+    number = data.get("account_number")
+    if number is not None and (not isinstance(number, str) or len(number) > 160):
+        raise ApiError("account_number must be text with at most 160 characters")
+    data["account_number"] = (number.strip() or None) if number is not None else None
     if data.get("type") not in ACCOUNT_TYPES:
         raise ApiError("Choose a supported account type")
     inferred = "asset" if data["type"] in ASSET_TYPES else "liability" if data["type"] in LIABILITY_TYPES else {"Income Source": "income", "Expense Payee": "expense", "Equity": "equity"}[data["type"]]
-    data["account_class"] = data.get("account_class", inferred)
+    if existing and data["type"] != existing.data.get("type") and data.get("account_class") == existing.data.get("account_class"):
+        data["account_class"] = inferred
+    else:
+        data["account_class"] = data.get("account_class", inferred)
     if data["account_class"] != inferred:
         raise ApiError("Account type and accounting class do not agree")
     data["currency"] = currency_code(data.get("currency", "USD"))
-    data["opening_balance"] = amount(data.get("opening_balance", "0"), data["currency"], "opening_balance")
+    data["opening_currency"] = currency_code(data.get("opening_currency", existing.data["currency"] if existing else data["currency"]))
+    data["opening_balance"] = amount(data.get("opening_balance", "0"), data["opening_currency"], "opening_balance")
     if inferred == "liability" and decimal(data["opening_balance"]) > 0:
         data["opening_balance"] = money(-decimal(data["opening_balance"]))
     data["opening_date"] = date_string(data.get("opening_date", date.today().isoformat()), "opening_date")
-    changed = not existing or any(data.get(k) != existing.data.get(k) for k in ("opening_date", "currency")) or (existing and not decimal(existing.data.get("opening_balance", "0")) and decimal(data["opening_balance"]))
+    changed = not existing or data["opening_date"] != existing.data.get("opening_date") or data["opening_currency"] != existing.data.get("opening_currency", existing.data["currency"]) or (existing and not decimal(existing.data.get("opening_balance", "0")) and decimal(data["opening_balance"]))
+    if changed and not preserve_snapshots:
+        data.pop("opening_posting_snapshots", None)
     if (changed and not (preserve_snapshots and data.get("opening_fx_rate"))) or not data.get("opening_fx_rate"):
-        data["opening_fx_rate"] = money(rate_for(data["currency"], data["opening_date"])) if decimal(data["opening_balance"]) else "1"
+        data["opening_fx_rate"] = money(rate_for(data["opening_currency"], data["opening_date"])) if decimal(data["opening_balance"]) else "1"
     if decimal(data["opening_fx_rate"], "opening_fx_rate") <= 0:
         raise ApiError("Opening conversion rate must be positive")
     if existing and existing.data.get("system"):
         raise ApiError("Built-in counterpart accounts cannot be edited", 409)
-    if existing and any(data[key] != existing.data.get(key) for key in ("currency", "account_class")):
-        if db.session.scalar(select(Posting.id).where(Posting.account_id == existing.id).limit(1)):
-            raise ApiError("An account's currency and accounting class cannot change after it has postings", 409)
+    if existing and data["account_class"] != existing.data.get("account_class"):
+        if has_ledger_history(account_history(existing.id)):
+            raise ApiError("An account's accounting class cannot change after it has postings", 409)
 
 
 def _validate_transaction(data, existing=None, preserve_snapshots=False, historical=False):
@@ -147,7 +166,12 @@ def _validate_transaction(data, existing=None, preserve_snapshots=False, histori
     destination = _reference(data, "destination_account_id", "account", True, historical)
     is_return = data.get("type") == "Return"
     if is_return:
-        if source.id != destination.id or source.data.get("type") not in INVESTMENT_TYPES or source.data.get("account_class") != "asset":
+        return_type = source.data.get("type")
+        if existing and existing.data.get("type") == "Return" and existing.data.get("source_account_id") == source.id:
+            return_type = existing.data.get("return_account_type", return_type)
+        elif preserve_snapshots:
+            return_type = data.get("return_account_type", return_type)
+        if source.id != destination.id or return_type not in INVESTMENT_TYPES or source.data.get("account_class") != "asset":
             raise ApiError("Returns require the same investment account as source and destination")
     elif source.id == destination.id:
         raise ApiError("Source and destination must be different accounts")
@@ -167,16 +191,22 @@ def _validate_transaction(data, existing=None, preserve_snapshots=False, histori
         raise ApiError("Only expenses may be marked as refunds")
     if data.get("investment_fee") and (data["type"] != "Expense" or data.get("is_refund")):
         raise ApiError("Investment fees must be outgoing expenses")
-    data["amount"] = amount(data.get("amount"), source.data["currency"], positive=not is_return)
+    data["currency"] = currency_code(data.get("currency") or source.data["currency"])
+    data["destination_currency"] = currency_code(data.get("destination_currency") or (data["currency"] if is_return else destination.data["currency"]))
+    if is_return and data["destination_currency"] != data["currency"]:
+        raise ApiError("Return currencies must agree")
+    data["amount"] = amount(data.get("amount"), data["currency"], positive=not is_return)
     if is_return and decimal(data["amount"]) == 0:
         raise ApiError("Return amount must be positive or negative, not zero")
     # Preserve the exact saved conversion when an unrelated field is edited.
-    s_changed = not existing or any(data.get(k) != existing.data.get(k) for k in ("date", "source_account_id"))
-    d_changed = not existing or any(data.get(k) != existing.data.get(k) for k in ("date", "destination_account_id"))
+    s_changed = not existing or any(data.get(k) != existing.data.get(k) for k in ("date", "source_account_id", "currency"))
+    d_changed = not existing or any(data.get(k) != existing.data.get(k) for k in ("date", "destination_account_id", "destination_currency"))
+    if existing and data.get("date") != existing.data.get("date") and not preserve_snapshots:
+        data.pop("posting_snapshots", None)
     if (s_changed and not (preserve_snapshots and data.get("fx_rate"))) or "fx_rate" not in data:
-        data["fx_rate"] = money(rate_for(source.data["currency"], data["date"]))
+        data["fx_rate"] = money(rate_for(data["currency"], data["date"]))
     if (d_changed and not (preserve_snapshots and data.get("destination_fx_rate"))) or "destination_fx_rate" not in data:
-        data["destination_fx_rate"] = money(rate_for(destination.data["currency"], data["date"]))
+        data["destination_fx_rate"] = money(rate_for(data["destination_currency"], data["date"]))
     if decimal(data["fx_rate"], "fx_rate") <= 0 or decimal(data["destination_fx_rate"], "destination_fx_rate") <= 0:
         raise ApiError("Conversion rates must be positive")
     if is_return:
@@ -184,12 +214,10 @@ def _validate_transaction(data, existing=None, preserve_snapshots=False, histori
         data["destination_fx_rate"] = data["fx_rate"]
     data["usd_amount"] = money(decimal(data["amount"]) * decimal(data["fx_rate"]))
     if not data.get("destination_amount"):
-        data["destination_amount"] = money(quantize(decimal(data["usd_amount"]) / decimal(data["destination_fx_rate"]), destination.data["currency"]))
-    data["destination_amount"] = amount(data["destination_amount"], destination.data["currency"], "destination_amount", positive=not is_return)
+        data["destination_amount"] = money(quantize(decimal(data["usd_amount"]) / decimal(data["destination_fx_rate"]), data["destination_currency"]))
+    data["destination_amount"] = amount(data["destination_amount"], data["destination_currency"], "destination_amount", positive=not is_return)
     data["destination_usd_amount"] = money(decimal(data["destination_amount"]) * decimal(data["destination_fx_rate"]))
-    data["currency"] = source.data["currency"]
-    data["destination_currency"] = destination.data["currency"]
-    if source.data["currency"] == destination.data["currency"] and decimal(data["amount"]) != decimal(data["destination_amount"]):
+    if data["currency"] == data["destination_currency"] and decimal(data["amount"]) != decimal(data["destination_amount"]):
         raise ApiError("Amounts must agree for a transfer in the same currency; record fees separately")
     _reference(data, "category_id", "category", include_deleted=historical)
     tag_ids = data.get("tag_ids", [])
@@ -245,13 +273,16 @@ def _validate(kind, data, existing, preserve_snapshots=False, historical=False):
         _reference(data, "destination_account_id", "account", True, historical)
         is_return = data.get("type") == "Return"
         if is_return:
-            if data["source_account_id"] != data["destination_account_id"] or source.data.get("type") not in INVESTMENT_TYPES or source.data.get("account_class") != "asset":
+            return_type = source.data.get("type")
+            if existing and existing.data.get("type") == "Return" and existing.data.get("source_account_id") == source.id:
+                return_type = existing.data.get("return_account_type", return_type)
+            elif preserve_snapshots:
+                return_type = data.get("return_account_type", return_type)
+            if data["source_account_id"] != data["destination_account_id"] or return_type not in INVESTMENT_TYPES or source.data.get("account_class") != "asset":
                 raise ApiError("Returns require the same investment account as source and destination")
         elif data["source_account_id"] == data["destination_account_id"]:
             raise ApiError("Subscription accounts must differ")
         data["currency"] = currency_code(data.get("currency", source.data["currency"]))
-        if data["currency"] != source.data["currency"]:
-            raise ApiError("Subscription amount uses the source account currency")
         data["amount"] = amount(data.get("amount"), data["currency"], positive=not is_return)
         if is_return and decimal(data["amount"]) == 0:
             raise ApiError("Return amount must be positive or negative, not zero")
@@ -278,16 +309,18 @@ def _validate(kind, data, existing, preserve_snapshots=False, historical=False):
         if account.data["account_class"] != "asset":
             raise ApiError("Market valuations apply to asset accounts")
         data["date"] = date_string(data.get("date"))
-        data["amount"] = amount(data.get("amount"), account.data["currency"])
+        data["currency"] = currency_code(data.get("currency") or account.data["currency"])
+        data["amount"] = amount(data.get("amount"), data["currency"])
         if decimal(data["amount"]) < 0:
             raise ApiError("Market valuation cannot be negative")
         if not historical and any(r.id != (existing.id if existing else None) and r.data["account_id"] == account.id and r.data["date"] == data["date"] for r in list_records("valuation")):
             raise ApiError("An account already has a valuation for this date", 409)
-        changed = not existing or any(data.get(k) != existing.data.get(k) for k in ("account_id", "date"))
+        changed = not existing or any(data.get(k) != existing.data.get(k) for k in ("account_id", "date", "currency"))
+        if changed and not preserve_snapshots:
+            data.pop("posting_snapshots", None)
         if (changed and not (preserve_snapshots and data.get("fx_rate"))) or not data.get("fx_rate"):
-            data["fx_rate"] = money(rate_for(account.data["currency"], data["date"]))
+            data["fx_rate"] = money(rate_for(data["currency"], data["date"]))
         data["usd_amount"] = money(decimal(data["amount"]) * decimal(data["fx_rate"]))
-        data["currency"] = account.data["currency"]
     elif kind == "rule":
         required_text(data, "name", 160)
         data["priority"] = _integer(data.get("priority", 100), 0, 100000, "priority")
@@ -338,7 +371,8 @@ def _integer(value, minimum, maximum, field):
 
 
 def _currency_referenced(code):
-    return any(r.data.get("currency") == code for kind in ("account", "subscription", "rate") for r in list_records(kind))
+    return any(code in (r.data.get("currency"), r.data.get("destination_currency"), r.data.get("opening_currency"))
+               for kind in ("account", "transaction", "valuation", "subscription", "rate") for r in list_records(kind, True))
 
 
 def rule_matches(rule, data):
@@ -387,7 +421,7 @@ def _link_subscription(data, transaction_id):
     candidates = []
     for subscription in subs:
         sub = subscription.data
-        if not explicit and (not sub.get("active", True) or any(sub.get(k) != data.get(k) for k in ("source_account_id", "destination_account_id", "type")) or abs(decimal(sub["amount"]) - decimal(data["amount"])) > decimal(sub.get("amount_tolerance", "0"))):
+        if not explicit and (not sub.get("active", True) or any(sub.get(k) != data.get(k) for k in ("source_account_id", "destination_account_id", "type", "currency")) or abs(decimal(sub["amount"]) - decimal(data["amount"])) > decimal(sub.get("amount_tolerance", "0"))):
             continue
         tolerance = int(sub.get("day_tolerance", 3))
         for due in occurrences(sub, txdate - timedelta(days=tolerance), txdate + timedelta(days=tolerance)):
@@ -405,13 +439,43 @@ def _link_subscription(data, transaction_id):
         data["subscription_candidates"] = [{"subscription_id": sid, "date": when} for sid, when in candidates]
 
 
+def _posting_snapshots(data):
+    snapshots = data.get("posting_snapshots", {})
+    if not isinstance(snapshots, dict) or len(snapshots) > 1000:
+        raise ApiError("posting_snapshots must be an object with at most 1000 accounts")
+    for snapshot in snapshots.values():
+        if not isinstance(snapshot, dict) or not snapshot.get("currency"):
+            raise ApiError("Each posting snapshot needs a currency and positive fx_rate")
+        currency_code(snapshot["currency"])
+        if decimal(snapshot.get("fx_rate"), "posting conversion rate") <= 0:
+            raise ApiError("Posting conversion rates must be positive")
+    return deepcopy(snapshots)
+
+
 def _replace_postings(record, entries):
     if sum((value[2] for value in entries), Decimal(0)) != 0:
         raise ApiError("Journal postings do not balance", 500, "unbalanced_journal")
     db.session.query(Posting).filter_by(transaction_id=record.id).delete(synchronize_session=False)
+    snapshots = _posting_snapshots(record.data)
     for account_id, native, usd in entries:
+        account = get_record("account", account_id, True)
+        currency = account.data["currency"]
+        data = record.data
+        entry_currency = (data.get("currency", currency) if account_id == data.get("account_id") or account_id == data.get("source_account_id")
+                          else data.get("destination_currency", currency) if account_id == data.get("destination_account_id") else "USD")
+        if entry_currency != currency and native:
+            snapshot = snapshots.get(account_id, {})
+            if snapshot.get("currency") != currency:
+                snapshot = {"currency": currency, "fx_rate": money(rate_for(currency, data["date"]))}
+                snapshots[account_id] = snapshot
+            conversion = decimal(snapshot["fx_rate"], "posting conversion rate")
+            if conversion <= 0:
+                raise ApiError("Posting conversion rates must be positive")
+            native = quantize(usd / conversion, currency)
         db.session.add(Posting(transaction_id=record.id, account_id=account_id,
                                native_amount=money(native), usd_amount=money(usd)))
+    if snapshots:
+        record.data = {**record.data, "posting_snapshots": snapshots}
     db.session.flush()
 
 
@@ -437,17 +501,20 @@ def _system_journal(key, system, account_id, native, when, rate, actor=None, ext
     record = db.session.get(Record, rid)
     before = record.to_dict() if record else None
     data = {"system": system, "account_id": account_id, "date": when,
+            "currency": get_record("account", account_id, True).data["currency"],
             "description": {"opening": "Opening balance", "valuation": "Market valuation adjustment", "reconciliation": "Balance reconciliation"}[system],
             "amount": money(native), "usd_amount": money(native * rate), "fx_rate": money(rate), **(extra or {})}
     if not record:
         record = Record(id=rid, kind="transaction", data=data)
         db.session.add(record)
-    elif record.data == data and not record.deleted:
+    elif {k: v for k, v in record.data.items() if k != "posting_snapshots"} == {k: v for k, v in data.items() if k != "posting_snapshots"} and not record.deleted:
         if force_postings:
             usd = native * rate
             _replace_postings(record, [(account_id, native, usd), (system_id(system), -usd, -usd)])
         return record
     else:
+        if record.data.get("date") == when and record.data.get("posting_snapshots"):
+            data["posting_snapshots"] = record.data["posting_snapshots"]
         record.data = data
         record.deleted = False
         record.revision += 1
@@ -469,12 +536,26 @@ def rebuild_account_valuations(account_id, actor=None):
     active_ids = set()
     for valuation in valuations:
         target = decimal(valuation.data["amount"])
+        currency = get_record("account", account_id, True).data["currency"]
+        valuation_currency = valuation.data.get("currency", currency)
+        conversion = decimal(valuation.data["fx_rate"])
+        if valuation_currency != currency:
+            snapshots = _posting_snapshots(valuation.data)
+            snapshot = snapshots.get(account_id, {})
+            if snapshot.get("currency") != currency:
+                snapshot = {"currency": currency, "fx_rate": money(rate_for(currency, valuation.data["date"]))}
+                snapshots[account_id] = snapshot
+                valuation.data = {**valuation.data, "posting_snapshots": snapshots}
+            conversion = decimal(snapshot["fx_rate"])
+            if conversion <= 0:
+                raise ApiError("Posting conversion rates must be positive")
+            target = quantize(target * decimal(valuation.data["fx_rate"]) / conversion, currency)
         adjustment = target - account_balance(account_id, valuation.data["date"])
         key = "valuation/" + valuation.id
         rid = system_id("journal/" + key)
         active_ids.add(rid)
-        _system_journal(key, "valuation", account_id, adjustment, valuation.data["date"], decimal(valuation.data["fx_rate"]), actor,
-                        {"valuation_id": valuation.id}, force_postings=True)
+        _system_journal(key, "valuation", account_id, adjustment, valuation.data["date"], conversion, actor,
+                        {"valuation_id": valuation.id, "currency": currency}, force_postings=True)
     for journal in journals:
         if journal.id not in active_ids and not journal.deleted:
             before = journal.to_dict()
@@ -505,6 +586,18 @@ def save_record(kind, data, actor, record_id=None, expected_revision=None, origi
     before = existing.to_dict() if existing else None
     previous = {k: deepcopy(v) for k, v in existing.data.items() if k not in META_FIELDS} if existing and not (replace or origin == "import") else {}
     merged = {**previous, **{k: v for k, v in incoming.items() if k not in META_FIELDS}}
+    if origin == "manual":
+        for field in ("posting_snapshots", "opening_posting_snapshots"):
+            merged.pop(field, None)
+            if existing and existing.data.get(field):
+                merged[field] = deepcopy(existing.data[field])
+    currency_change = merged.pop("currency_change", None) if kind == "account" else None
+    changing_currency = kind == "account" and existing and merged.get("currency") != existing.data.get("currency")
+    if changing_currency:
+        if origin == "manual" and currency_change not in ("keep", "relabel"):
+            raise ApiError("Choose whether to keep or relabel existing transaction currencies", 409, "currency_choice_required")
+        if currency_change == "relabel":
+            merged["opening_currency"] = merged["currency"]
     if merged.get("system"):
         raise ApiError("The system field is reserved")
     if kind == "transaction" and existing and "amount" in incoming and incoming["amount"] != existing.data.get("amount") and "destination_amount" not in incoming:
@@ -525,6 +618,15 @@ def save_record(kind, data, actor, record_id=None, expected_revision=None, origi
     record = existing or Record(id=rid or new_id(), kind=kind)
     if not existing:
         db.session.add(record)
+    if kind == "account" and existing and existing.data.get("type") in INVESTMENT_TYPES and merged["type"] not in INVESTMENT_TYPES:
+        for linked in account_history(record.id) + list_records("subscription", True):
+            if linked.data.get("type") != "Return" or linked.data.get("source_account_id") != record.id or linked.data.get("return_account_type"):
+                continue
+            linked_before = linked.to_dict()
+            linked.data = {**linked.data, "return_account_type": existing.data["type"]}
+            linked.revision += 1
+            linked.last_modified = utcnow()
+            add_audit(linked.kind, linked.id, "update", actor, "account-type", linked_before, linked.to_dict())
     record.data = merged
     record.deleted = bool(incoming.get("deleted", False)) if preserve_modified else False
     record.revision = existing.revision + 1 if existing else 1
@@ -542,7 +644,15 @@ def save_record(kind, data, actor, record_id=None, expected_revision=None, origi
     elif kind == "account" and not record.deleted:
         native = decimal(merged["opening_balance"])
         rate = decimal(merged["opening_fx_rate"])
-        _system_journal("opening/" + record.id, "opening", record.id, native, merged["opening_date"], rate, actor)
+        extra = {"currency": merged["opening_currency"]}
+        if merged.get("opening_posting_snapshots"):
+            extra["posting_snapshots"] = merged["opening_posting_snapshots"]
+        opening = _system_journal("opening/" + record.id, "opening", record.id, native, merged["opening_date"], rate, actor,
+                                  extra, force_postings=bool(changing_currency))
+        if opening.data.get("posting_snapshots"):
+            record.data = {**record.data, "opening_posting_snapshots": opening.data["posting_snapshots"]}
+        if changing_currency:
+            _change_account_currency(record, before["currency"], currency_change == "relabel", actor)
         affected.add(record.id)
     elif kind == "valuation":
         affected.add(merged["account_id"])
@@ -555,6 +665,56 @@ def save_record(kind, data, actor, record_id=None, expected_revision=None, origi
     return record
 
 
+def _change_account_currency(account, old_currency, relabel, actor):
+    """Rebuild native postings; historical transaction amounts never change."""
+    currency = account.data["currency"]
+    for record in account_history(account.id):
+        if record.deleted or record.data.get("system") in ("opening", "valuation"):
+            continue
+        before = record.to_dict()
+        data = deepcopy(record.data)
+        if not data.get("system"):
+            if relabel:
+                if data.get("source_account_id") == account.id:
+                    data["currency"] = currency
+                    data["fx_rate"] = money(rate_for(currency, data["date"]))
+                if data.get("destination_account_id") == account.id:
+                    data["destination_currency"] = currency
+                    data["destination_fx_rate"] = money(rate_for(currency, data["date"]))
+                try:
+                    _validate_transaction(data, record)
+                except ApiError as error:
+                    raise ApiError(f"Cannot relabel transaction '{data.get('description', record.id)}': {error.message}. Keep existing currencies or edit this transaction first.", error.status, error.code)
+            record.data = data
+            _transaction_postings(record)
+        else:
+            data["currency"] = currency if relabel else data.get("currency", old_currency)
+            if relabel:
+                data["amount"] = amount(data["amount"], currency)
+                data["fx_rate"] = money(rate_for(currency, data["date"]))
+                data["usd_amount"] = money(decimal(data["amount"]) * decimal(data["fx_rate"]))
+            record.data = data
+            native, usd = decimal(data["amount"]), decimal(data["usd_amount"])
+            _replace_postings(record, [(account.id, native, usd), (system_id("reconciliation"), -usd, -usd)])
+        if record.data != {k: v for k, v in before.items() if k not in META_FIELDS}:
+            record.revision += 1
+            record.last_modified = utcnow()
+            add_audit("transaction", record.id, "update", actor, "account-currency", before, record.to_dict())
+    if relabel:
+        for valuation in list_records("valuation"):
+            if valuation.data.get("account_id") != account.id:
+                continue
+            before = valuation.to_dict()
+            data = {**valuation.data, "currency": currency,
+                    "fx_rate": money(rate_for(currency, valuation.data["date"]))}
+            data["amount"] = amount(data["amount"], currency)
+            data["usd_amount"] = money(decimal(data["amount"]) * decimal(data["fx_rate"]))
+            valuation.data = data
+            valuation.revision += 1
+            valuation.last_modified = utcnow()
+            add_audit("valuation", valuation.id, "update", actor, "account-currency", before, valuation.to_dict())
+
+
 def void_record(kind, record_id, actor, expected_revision=None, origin="manual", last_modified=None):
     record = get_record(kind, record_id, True)
     if record.data.get("system"):
@@ -563,10 +723,16 @@ def void_record(kind, record_id, actor, expected_revision=None, origin="manual",
         raise ApiError("revision is required when deleting", 428, "revision_required")
     if expected_revision is not None and int(expected_revision) != record.revision:
         raise ApiError("This record has changed", 409, "revision_conflict")
-    if kind == "account" and db.session.scalar(select(Posting.id).where(Posting.account_id == record.id).limit(1)):
-        raise ApiError("Accounts with ledger history must be retained", 409)
+    if kind == "account":
+        history = account_history(record.id)
+        if has_ledger_history(history):
+            raise ApiError("Accounts with ledger history must be retained", 409)
     if kind == "account" and any(record.id in (r.data.get("account_id"), r.data.get("source_account_id"), r.data.get("destination_account_id")) for r in list_records("valuation") + list_records("subscription")):
         raise ApiError("This account is referenced by a valuation or subscription", 409)
+    if kind == "account" and any(item.get("account_id") == record.id for r in list_records("scenario") for field in ("assumptions", "flows") for item in r.data.get(field, [])):
+        raise ApiError("This account is referenced by a scenario", 409)
+    if kind == "account" and any(c.get("field") in ("source_account_id", "destination_account_id") and c.get("value") == record.id for r in list_records("rule") for c in r.data.get("conditions", [])):
+        raise ApiError("This account is referenced by a rule", 409)
     if kind == "currency" and _currency_referenced(record.data["code"]):
         raise ApiError("This currency is still in use", 409)
     if kind in ("category", "tag", "subscription"):
@@ -578,6 +744,15 @@ def void_record(kind, record_id, actor, expected_revision=None, origin="manual",
     record.revision += 1
     record.last_modified = timestamp(last_modified) if last_modified else utcnow()
     affected = set()
+    if kind == "account":
+        for journal in history:
+            if not journal.deleted:
+                journal_before = journal.to_dict()
+                journal.deleted = True
+                journal.revision += 1
+                journal.last_modified = record.last_modified
+                db.session.query(Posting).filter_by(transaction_id=journal.id).delete(synchronize_session=False)
+                add_audit("transaction", journal.id, "void", actor, "derived", journal_before, journal.to_dict())
     if kind == "transaction":
         db.session.query(Posting).filter_by(transaction_id=record.id).delete(synchronize_session=False)
         affected.update([record.data["source_account_id"], record.data["destination_account_id"]])

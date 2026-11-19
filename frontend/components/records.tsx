@@ -80,6 +80,12 @@ export function useFields(resource: string): FieldSpec[] {
     accounts: [
       { name: "name", label: "Account name", required: true, wide: true },
       {
+        name: "account_number",
+        label: "Account number (optional)",
+        hint: "Used to identify, link, or search for this account.",
+        wide: true,
+      },
+      {
         name: "type",
         label: "Account type",
         type: "select",
@@ -201,6 +207,13 @@ export function useFields(resource: string): FieldSpec[] {
         options: accountOptions,
       },
       {
+        name: "currency",
+        label: "Valuation currency",
+        type: "select",
+        options: currencyOptions,
+        hint: "Leave blank to use the account’s currency.",
+      },
+      {
         name: "date",
         label: "Valuation date",
         type: "date",
@@ -212,7 +225,7 @@ export function useFields(resource: string): FieldSpec[] {
         label: "Closing market value",
         type: "decimal",
         required: true,
-        hint: "Include cash. Enter the value in the account’s native currency.",
+        hint: "Include cash. Enter the value in the selected valuation currency.",
         wide: true,
       },
     ],
@@ -410,7 +423,9 @@ export function DeleteDialog({
       <p className="dialog-copy">
         {resource === "transactions"
           ? "This removes the transaction from active balances and reports. Its original values remain in the audit history."
-          : `Remove “${record.name || record.description || record.date || "this record"}”? Records in use may need to be unlinked first.`}
+          : resource === "accounts"
+            ? `Remove “${record.name}” from active accounts? Only unused accounts with a zero opening balance can be removed. Audit history is retained; linked records must be unlinked first.`
+            : `Remove “${record.name || record.description || record.date || "this record"}”? Records in use may need to be unlinked first.`}
       </p>
       <ErrorBox error={error} />
       <div className="modal-footer">
@@ -759,6 +774,7 @@ export function Accounts() {
   const [removed, setRemoved] = useState<Entity | null>(null);
   const [group, setGroup] = useState("owned");
   const [typeFilter, setTypeFilter] = useState("");
+  const [search, setSearch] = useState("");
   const valuations = useLoad<ListResult>(
     "/valuations?" + query({ account_id: selectedId, page_size: 500 }),
     { items: [], total: 0, page: 1, page_size: 500 },
@@ -768,7 +784,10 @@ export function Accounts() {
   const owned = accounts.filter(
     (a: Entity) =>
       ["asset", "liability"].includes(a.account_class) &&
-      (!typeFilter || a.type === typeFilter),
+      (!typeFilter || a.type === typeFilter) &&
+      `${a.name} ${a.account_number || ""}`
+        .toLowerCase()
+        .includes(search.toLowerCase()),
   );
   const asset = decimalSum(
       owned
@@ -785,7 +804,10 @@ export function Accounts() {
       (group === "owned"
         ? ["asset", "liability"].includes(a.account_class)
         : !["asset", "liability"].includes(a.account_class)) &&
-      (!typeFilter || a.type === typeFilter),
+      (!typeFilter || a.type === typeFilter) &&
+      `${a.name} ${a.account_number || ""}`
+        .toLowerCase()
+        .includes(search.toLowerCase()),
   );
   return (
     <>
@@ -797,7 +819,7 @@ export function Accounts() {
           </button>
           <PageHead
             title={selected.name}
-            subtitle={`${selected.type} · ${selected.currency}`}
+            subtitle={`${selected.type} · ${selected.currency}${selected.account_number ? ` · ${selected.account_number}` : ""}`}
             action={
               !selected.system && (
                 <>
@@ -923,6 +945,12 @@ export function Accounts() {
                 Payees & sources
               </button>
             </div>
+            <input
+              aria-label="Search accounts by name or account number"
+              placeholder="Search name or account number"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
             <select
               aria-label="Filter by account type"
               value={typeFilter}
@@ -992,6 +1020,7 @@ export function Accounts() {
                   <p>
                     {a.type}{" "}
                     {a.account_class === "liability" ? "· Amount owed" : ""}
+                    {a.account_number ? ` · ${a.account_number}` : ""}
                   </p>
                   <div className="account-balance">
                     {money(a.balance, a.currency)}

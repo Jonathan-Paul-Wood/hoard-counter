@@ -50,7 +50,11 @@ export function RecordEditor({
   );
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [currencyChoice, setCurrencyChoice] = useState("");
+  const changingCurrency =
+    resource === "accounts" && record && values.currency !== record.currency;
   function setField(name: string, value: any) {
+    if (resource === "accounts" && name === "currency") setCurrencyChoice("");
     setValues((current) => {
       const next = { ...current, [name]: value };
       if (resource === "accounts" && name === "type")
@@ -83,6 +87,7 @@ export function RecordEditor({
     setError("");
     try {
       const body: any = { ...values };
+      if (changingCurrency) body.currency_change = currencyChoice;
       for (const field of fields) {
         if (field.type === "integer")
           body[field.name] = Number(body[field.name]);
@@ -115,7 +120,16 @@ export function RecordEditor({
       <form onSubmit={submit}>
         <div className="form-grid">
           {fields.map((f) => (
-            <Field key={f.name} label={f.label} hint={f.hint} wide={f.wide}>
+            <Field
+              key={f.name}
+              label={
+                resource === "accounts" && f.name === "opening_balance"
+                  ? `Opening balance (${currencyChoice === "relabel" ? values.currency : record?.opening_currency || record?.currency || values.currency})`
+                  : f.label
+              }
+              hint={f.hint}
+              wide={f.wide}
+            >
               {f.type === "select" ? (
                 <select
                   value={values[f.name]}
@@ -168,6 +182,27 @@ export function RecordEditor({
             </Field>
           ))}
         </div>
+        {changingCurrency && (
+          <Field
+            label="Existing transaction currencies"
+            hint="Amounts stay unchanged. Relabeling also updates opening balances, valuations, and reconciliations. Future reports reflect this change; exported files stay unchanged."
+            wide
+          >
+            <select
+              required
+              value={currencyChoice}
+              onChange={(e) => setCurrencyChoice(e.target.value)}
+            >
+              <option value="">Choose how to handle existing history…</option>
+              <option value="keep">
+                Keep existing currencies; convert account balances
+              </option>
+              <option value="relabel">
+                Relabel this account’s transaction amounts as {values.currency}
+              </option>
+            </select>
+          </Field>
+        )}
         <ErrorBox error={error} />
         <div className="modal-footer">
           <Button type="button" variant="secondary" onClick={onClose}>
@@ -199,6 +234,8 @@ export function TransactionEditor({
     destination_account_id: "",
     date: today(),
     amount: "",
+    currency: "",
+    destination_currency: "",
     destination_amount: "",
     description: "",
     category_id: "",
@@ -238,6 +275,23 @@ export function TransactionEditor({
     setValues((v: any) => ({
       ...v,
       [name]: value,
+      ...(name === "source_account_id"
+        ? {
+            currency:
+              accounts.find((a: Entity) => a.id === value)?.currency || "",
+            destination_amount: "",
+          }
+        : {}),
+      ...(name === "destination_account_id"
+        ? {
+            destination_currency:
+              accounts.find((a: Entity) => a.id === value)?.currency || "",
+            destination_amount: "",
+          }
+        : {}),
+      ...(name === "currency" || name === "destination_currency"
+        ? { destination_amount: "" }
+        : {}),
       ...(v.type === "Return" && name === "source_account_id"
         ? { destination_account_id: value }
         : {}),
@@ -246,10 +300,19 @@ export function TransactionEditor({
       (a: Entity) => a.id === values.source_account_id,
     ),
     dest = accounts.find((a: Entity) => a.id === values.destination_account_id);
+  const transactionCurrency = values.currency || source?.currency || "USD";
+  const destinationCurrency =
+    values.type === "Return"
+      ? transactionCurrency
+      : values.destination_currency || dest?.currency || "USD";
+  const currencies = (meta.currencies || []).map((c: any) =>
+    typeof c === "string" ? c : c.code,
+  );
   const sourceOptions = accounts.filter((a: Entity) =>
     values.type === "Return"
       ? a.account_class === "asset" &&
-        meta.investment_account_types.includes(a.type)
+        (meta.investment_account_types.includes(a.type) ||
+          record?.source_account_id === a.id)
       : values.type === "Income"
         ? a.account_class === "income"
         : values.type === "Expense" && values.is_refund
@@ -269,6 +332,8 @@ export function TransactionEditor({
     setError("");
     try {
       const body = { ...values };
+      body.currency = transactionCurrency;
+      body.destination_currency = destinationCurrency;
       if (body.type === "Return") {
         body.destination_account_id = body.source_account_id;
         body.destination_amount = body.amount;
@@ -290,7 +355,7 @@ export function TransactionEditor({
         if (!body[k]) body[k] = null;
       });
       body.destination_amount =
-        source?.currency === dest?.currency
+        transactionCurrency === destinationCurrency
           ? body.amount
           : body.destination_amount || null;
       delete body.fee_amount;
@@ -411,7 +476,7 @@ export function TransactionEditor({
               </select>
             </Field>
             <Field
-              label={`Amount${source ? ` (${source.currency})` : ""}`}
+              label={`Amount (${transactionCurrency})`}
               hint={
                 values.type === "Return"
                   ? "Enter a positive gain or a negative loss."
@@ -434,9 +499,34 @@ export function TransactionEditor({
                 onChange={(e) => put("date", e.target.value)}
               />
             </Field>
-            {source && dest && source.currency !== dest.currency && (
+            <Field
+              label="Transaction currency"
+              hint="Defaults to the source account’s currency."
+            >
+              <select
+                value={transactionCurrency}
+                onChange={(e) => put("currency", e.target.value)}
+              >
+                {currencies.map((currency: string) => (
+                  <option key={currency}>{currency}</option>
+                ))}
+              </select>
+            </Field>
+            {values.type !== "Return" && (
+              <Field label="Destination currency">
+                <select
+                  value={destinationCurrency}
+                  onChange={(e) => put("destination_currency", e.target.value)}
+                >
+                  {currencies.map((currency: string) => (
+                    <option key={currency}>{currency}</option>
+                  ))}
+                </select>
+              </Field>
+            )}
+            {source && dest && transactionCurrency !== destinationCurrency && (
               <Field
-                label={`Received amount (${dest.currency})`}
+                label={`Received amount (${destinationCurrency})`}
                 hint="Leave blank to calculate using the dated exchange rate."
               >
                 <input

@@ -39,6 +39,174 @@ def assert_balanced():
         assert sum((Decimal(p.usd_amount) for p in postings), Decimal(0)) == 0
 
 
+def test_remove_unused_account_voids_zero_opening(app):
+    unused = account(opening="0")
+    opening = get_record("transaction", system_id("journal/opening/" + unused.id))
+    void_record("account", unused.id, None, unused.revision)
+    assert unused.deleted and opening.deleted
+    assert not db.session.scalar(db.select(Posting.id).where(Posting.account_id == unused.id))
+    with pytest.raises(ApiError, match="not found"):
+        get_record("account", unused.id)
+
+
+def test_remove_account_retains_real_history(app):
+    funded = account()
+    with pytest.raises(ApiError, match="ledger history"):
+        void_record("account", funded.id, None, funded.revision)
+    unused = account("Unused", "0")
+    tx = transaction(funded.id, unused.id)
+    void_record("transaction", tx.id, None, tx.revision)
+    with pytest.raises(ApiError, match="ledger history"):
+        void_record("account", unused.id, None, unused.revision)
+
+
+@pytest.mark.parametrize("kind,data", [
+    ("subscription", {"name": "Bill", "destination_account_id": system_id("expense"), "amount": "10", "start_date": "2025-01-01"}),
+    ("scenario", {"name": "Plan", "flows": []}),
+    ("rule", {"name": "Match", "conditions": [], "actions": {"notes": "Matched"}}),
+])
+def test_remove_unused_account_rejects_active_references(app, kind, data):
+    unused = account(opening="0")
+    data = {**data}
+    if kind == "subscription":
+        data["source_account_id"] = unused.id
+    elif kind == "scenario":
+        data["flows"] = [{"account_id": unused.id, "date": "2027-01-01", "amount": "1"}]
+    else:
+        data["conditions"] = [{"field": "source_account_id", "operator": "eq", "value": unused.id}]
+    linked = save_record(kind, data, None)
+    with pytest.raises(ApiError, match="referenced"):
+        void_record("account", unused.id, None, unused.revision)
+    void_record(kind, linked.id, None, linked.revision)
+    assert void_record("account", unused.id, None, unused.revision).deleted
+
+
+def test_account_number_preserves_leading_zeros_and_validates(app):
+    saved = save_record("account", {"name": "Numbered", "type": "Checking", "account_number": " 001234 "}, None)
+    assert saved.data["account_number"] == "001234"
+    saved = save_record("account", {"account_number": ""}, None, saved.id, saved.revision)
+    assert saved.data["account_number"] is None
+    with pytest.raises(ApiError, match="account_number must be text"):
+        save_record("account", {"name": "Invalid", "type": "Checking", "account_number": 1234}, None)
+
+
+def test_account_type_can_change_within_class_after_transactions(app):
+    checking, savings = account(), account("Savings", "0", typ="Savings")
+    transaction(checking.id, savings.id)
+    updated = save_record("account", {"type": "Savings"}, None, checking.id, checking.revision)
+    assert updated.data["type"] == "Savings"
+    assert updated.data["account_class"] == "asset"
+    assert account_balance(updated.id) == Decimal("90")
+    with pytest.raises(ApiError, match="cannot change after"):
+        save_record("account", {"type": "Credit Card"}, None, checking.id, checking.revision)
+
+
+def test_unused_account_can_change_currency_and_class(app):
+    unused = account(opening="0")
+    updated = save_record("account", {"type": "Credit Card", "currency": "EUR", "currency_change": "keep"}, None, unused.id, unused.revision)
+    assert updated.data["account_class"] == "liability"
+    assert updated.data["currency"] == "EUR"
+    assert account_balance(updated.id) == 0
+
+
+def test_transaction_currency_is_independent_and_defaults_to_source(app):
+    save_record("rate", {"currency": "EUR", "date": "2025-01-01", "rate": "2"}, None)
+    checking = account()
+    explicit = transaction(checking.id, system_id("expense"), typ="Expense", currency="EUR")
+    assert explicit.data["currency"] == "EUR"
+    assert explicit.data["usd_amount"] == "20"
+    assert account_balance(checking.id) == Decimal("80")
+    defaulted = transaction(checking.id, system_id("expense"), typ="Expense")
+    assert defaulted.data["currency"] == "USD"
+    assert account_balance(checking.id) == Decimal("70")
+    assert_balanced()
+
+
+@pytest.mark.parametrize("choice,expected,tx_currency,usd", [
+    ("keep", "45", "USD", "10"), ("relabel", "90", "EUR", "20"),
+])
+def test_change_account_currency_preserves_amounts(app, choice, expected, tx_currency, usd):
+    save_record("rate", {"currency": "EUR", "date": "2025-01-01", "rate": "2"}, None)
+    checking = account()
+    tx = transaction(checking.id, system_id("expense"), typ="Expense")
+    save_record("account", {"currency": "EUR", "currency_change": choice}, None, checking.id, checking.revision)
+    assert tx.data["currency"] == tx_currency
+    assert tx.data["amount"] == "10"
+    assert tx.data["usd_amount"] == usd
+    assert account_balance(checking.id) == Decimal(expected)
+    save_record("transaction", {"notes": "Edited after currency change"}, None, tx.id, tx.revision)
+    assert account_balance(checking.id) == Decimal(expected)
+    new = transaction(checking.id, system_id("expense"), "1", typ="Expense")
+    assert new.data["currency"] == "EUR"
+    assert account_balance(checking.id) == Decimal(expected) - 1
+    assert_balanced()
+
+
+def test_currency_change_requires_explicit_choice(app):
+    checking = account(opening="0")
+    with pytest.raises(ApiError) as error:
+        save_record("account", {"currency": "EUR"}, None, checking.id, checking.revision)
+    assert error.value.code == "currency_choice_required"
+
+
+def test_legacy_account_import_remains_idempotent(app):
+    from whc.exchange import classify
+    checking = account()
+    legacy = checking.to_dict()
+    legacy.pop("account_number")
+    legacy.pop("opening_currency")
+    assert classify("account", legacy)[0] == "skip"
+
+
+def test_existing_return_remains_editable_after_account_type_change(app):
+    investment = account(typ="Brokerage")
+    gain = transaction(investment.id, investment.id, "5", typ="Return")
+    save_record("account", {"type": "Checking"}, None, investment.id, investment.revision)
+    save_record("transaction", {"notes": "Historical investment gain"}, None, gain.id, gain.revision)
+    assert account_balance(investment.id) == Decimal("105")
+    with pytest.raises(ApiError, match="same investment account"):
+        transaction(investment.id, investment.id, "5", typ="Return")
+
+
+@pytest.mark.parametrize("choice,expected", [("keep", "45"), ("relabel", "90")])
+def test_reconciliation_retains_or_relabels_currency(app, choice, expected):
+    from whc.ledger import reconcile_account
+    save_record("rate", {"currency": "EUR", "date": "2025-01-01", "rate": "2"}, None)
+    checking = account()
+    journal = reconcile_account(checking.id, "90", "2025-01-05", None, checking.revision)
+    save_record("account", {"currency": "EUR", "currency_change": choice}, None, checking.id, checking.revision)
+    assert account_balance(checking.id) == Decimal(expected)
+    assert journal.data["amount"] == "-10"
+    assert journal.data["currency"] == ("USD" if choice == "keep" else "EUR")
+    assert_balanced()
+
+
+def test_destination_currency_is_independent_of_account_currency(app):
+    save_record("rate", {"currency": "EUR", "date": "2025-01-01", "rate": "2"}, None)
+    source, destination = account(), account("Savings", "0", typ="Savings")
+    tx = transaction(source.id, destination.id, "10", destination_currency="EUR")
+    assert tx.data["destination_amount"] == "5.00"
+    assert account_balance(destination.id) == Decimal("10")
+    save_record("account", {"currency": "EUR", "currency_change": "relabel"}, None, destination.id, destination.revision)
+    assert tx.data["currency"] == "USD" and tx.data["destination_currency"] == "EUR"
+    assert tx.data["amount"] == "10" and Decimal(tx.data["destination_amount"]) == 5
+    assert account_balance(destination.id) == 5
+    assert_balanced()
+
+
+def test_kept_currency_posting_snapshots_survive_rate_edits_and_valuations(app):
+    rate = save_record("rate", {"currency": "EUR", "date": "2025-01-01", "rate": "2"}, None)
+    checking = account(typ="Brokerage")
+    valuation = save_record("valuation", {"account_id": checking.id, "date": "2025-02-01", "amount": "120"}, None)
+    save_record("account", {"currency": "EUR", "currency_change": "keep"}, None, checking.id, checking.revision)
+    assert valuation.data["currency"] == "USD"
+    assert account_balance(checking.id) == Decimal("60")
+    save_record("rate", {"rate": "3"}, None, rate.id, rate.revision)
+    save_record("account", {"name": "Renamed"}, None, checking.id, checking.revision)
+    assert account_balance(checking.id) == Decimal("60")
+    assert_balanced()
+
+
 def test_double_entry_income_expense_transfer_liability(app):
     checking, savings = account(), account("Savings", "0", typ="Savings")
     debt = account("Card", "50", typ="Credit Card")

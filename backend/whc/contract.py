@@ -69,6 +69,18 @@ SCHEMAS.update({
     'ImportResult': obj({'summary': ref('ImportSummary'), 'changes': {'type': 'array', 'items': ref('ImportChange')}}, ['summary', 'changes']),
 })
 SCHEMAS['Credentials']['properties']['username'] = string(minLength=1, maxLength=80)
+SCHEMAS['Account']['properties']['account_number'] = {'anyOf': [string(maxLength=160), {'type': 'null'}]}
+SCHEMAS['Account']['properties']['opening_currency'] = string(description='Currency of the opening amount; preserved when existing currencies are kept.')
+SCHEMAS['Transaction']['properties']['currency'] = string(description='Defaults to the source account currency on creation.')
+SCHEMAS['Transaction']['properties']['destination_currency'] = string(description='Defaults to the destination account currency; Returns use the transaction currency.')
+SCHEMAS['Transaction']['properties']['destination_usd_amount'] = MONEY
+SCHEMAS['Valuation']['properties']['currency'] = string()
+SCHEMAS['SystemJournal']['properties']['currency'] = string()
+for name in ('Transaction', 'SystemJournal', 'Valuation'):
+    SCHEMAS[name]['properties']['posting_snapshots'] = {'type': 'object', 'additionalProperties': obj({'currency': string(), 'fx_rate': MONEY}, ['currency', 'fx_rate'])}
+SCHEMAS['Account']['properties']['opening_posting_snapshots'] = deepcopy(SCHEMAS['Transaction']['properties']['posting_snapshots'])
+for name in ('Transaction', 'Subscription'):
+    SCHEMAS[name]['properties']['return_account_type'] = string(description='Original investment account type retained for historical Returns.')
 SCHEMAS['Credentials']['properties']['password']['maxLength'] = 256
 SCHEMAS['User']['properties']['created_at'] = string(format='date-time')
 SCHEMAS['User']['required'].append('active')
@@ -100,13 +112,17 @@ def specification():
             writable['required'] = ['name', 'type']
         elif name == 'Subscription':
             writable['required'] = ['name', 'source_account_id', 'destination_account_id', 'amount', 'start_date']
-        elif name == 'Transaction':
-            writable['properties'].pop('currency', None)
+        writable['properties'].pop('posting_snapshots', None)
+        writable['properties'].pop('opening_posting_snapshots', None)
+        writable['properties'].pop('return_account_type', None)
+        writable['properties'].pop('destination_usd_amount', None)
         schemas[name + 'Input'] = writable
         item_schema = ref('CurrencyDefinition' if name == 'Currency' else 'Journal' if name == 'Transaction' else name)
         paths['/' + plural] = {'get': operation('List ' + plural, obj({'items': {'type': 'array', 'items': item_schema}, 'total': {'type': 'integer'}, 'page': {'type': 'integer'}, 'page_size': {'type': 'integer'}}, ['items', 'total', 'page', 'page_size'])), 'post': operation('Create ' + name.lower(), ref(name), ref(name + 'Input'), 'post')}
         paths['/' + plural]['get']['parameters'] = [{'name': k, 'in': 'query', 'schema': {'type': 'integer'} if k in ('page', 'page_size') else string()} for k in ('page', 'page_size', 'q', 'start', 'end', 'account_id', 'category_id', 'tag_id', 'currency', 'type', 'subscription_id', 'month')]
         patch = deepcopy(writable)
+        if name == 'Account':
+            patch['properties']['currency_change'] = string(enum=['keep', 'relabel'], description='Required when changing currency. Keep historical currencies, or relabel linked transaction sides, opening amounts, valuations, and reconciliations without changing amounts. Future reports reflect changes; exported files remain unchanged.')
         patch['properties']['revision'] = {'type': 'integer'}
         patch['required'] = ['revision']
         paths['/' + plural + '/{id}'] = {'parameters': [{'name': 'id', 'in': 'path', 'required': True, 'schema': ID}], 'get': operation('Read ' + name.lower(), ref('Journal') if name == 'Transaction' else ref(name)), 'patch': operation('Edit ' + name.lower(), ref(name), patch, 'patch'), 'delete': operation('Void ' + name.lower(), ref(name), ref('RevisionInput'), 'delete')}

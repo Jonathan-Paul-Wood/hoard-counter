@@ -808,7 +808,9 @@ export function Investments() {
               render: (r) =>
                 money(
                   r.amount,
-                  accounts.find((a: Entity) => a.id === r.account_id)?.currency,
+                  r.currency ||
+                    accounts.find((a: Entity) => a.id === r.account_id)
+                      ?.currency,
                 ),
             },
           ]}

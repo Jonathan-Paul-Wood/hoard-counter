@@ -48,7 +48,8 @@ def collection(resource):
         records = [record for record in records if not record.data.get("system")]
     query = request.args.get("q", "").casefold()
     if query:
-        records = [record for record in records if query in " ".join(str(record.data.get(k, "")) for k in ("name", "description", "notes")).casefold()]
+        fields = ("name", "description", "notes", "account_number") if kind == "account" else ("name", "description", "notes")
+        records = [record for record in records if query in " ".join(str(record.data.get(k) or "") for k in fields).casefold()]
     for field in ("category_id", "subscription_id", "type", "account_class", "currency", "month"):
         if request.args.get(field):
             records = [r for r in records if r.data.get(field) == request.args[field]]

@@ -73,7 +73,7 @@ def transaction_records(filters=None):
             continue
         if filters.get('account_type') and not any(accounts.get(i, {}).get('type') == filters['account_type'] for i in pair):
             continue
-        if filters.get('currency') and not any(accounts.get(i, {}).get('currency') == filters['currency'] for i in pair):
+        if filters.get('currency') and filters['currency'] not in (row.get('currency'), row.get('destination_currency')):
             continue
         result.append(row)
     return sorted(result, key=lambda r: (r['date'], r['id']), reverse=True)
