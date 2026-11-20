@@ -35,6 +35,40 @@ def test_indefinite_daily_schedule_does_not_expand_history():
     assert credit_count(dict(period='day', frequency=1, start_date='0001-01-01'), date.max) == date.max.toordinal()
 
 
+def test_monthly_progress_uses_full_month_credits_and_month_to_date_expenses(household):
+    _, client, _, create, account, category = household
+    create('budgets', dict(category_id=category['id'], amount='5', period='day', frequency=1,
+                           start_date='2026-08-01', end_date='2026-09-30'))
+    create('transactions', expense(account, category, '40', '2026-08-31'))
+    create('transactions', expense(account, category, '30', '2026-09-02'))
+    create('transactions', dict(source_account_id=system_id('expense'), destination_account_id=account['id'],
+                                type='Expense', date='2026-09-03', amount='5', description='Refund',
+                                category_id=category['id'], is_refund=True))
+    create('transactions', expense(account, category, '100', '2026-09-25'))
+    item = client.get('/api/v1/budget-summary?as_of=2026-09-10').json['items'][0]
+    assert Decimal(item['monthly_budget']) == 150
+    assert Decimal(item['monthly_actual']) == 25
+    assert Decimal(item['budget']) == 205
+    assert Decimal(item['actual']) == 65
+    # Ended budgets retain allocations, but no longer contribute monthly credits.
+    item = client.get('/api/v1/budget-summary?as_of=2026-10-10').json['items'][0]
+    assert Decimal(item['monthly_budget']) == 0
+    assert Decimal(item['monthly_actual']) == 0
+    assert Decimal(item['budget']) == 305
+
+
+def test_monthly_progress_counts_anchored_occurrences_across_schedule_changes(household):
+    _, client, _, create, _, category = household
+    create('budgets', dict(category_id=category['id'], amount='100', period='month', frequency=1,
+                           start_date='2026-01-31', end_date='2026-02-28'))
+    create('budgets', dict(category_id=category['id'], amount='10', period='week', frequency=2,
+                           start_date='2026-03-01', end_date='2026-03-15'))
+    february = client.get('/api/v1/budget-summary?as_of=2026-02-01').json['items'][0]
+    assert Decimal(february['monthly_budget']) == 100
+    march = client.get('/api/v1/budget-summary?as_of=2026-03-01').json['items'][0]
+    assert Decimal(march['monthly_budget']) == 20
+
+
 def test_carryover_refunds_negative_allocations_and_no_postings(household):
     _, client, headers, create, account, category = household
     before = client.get('/api/v1/accounts/' + account['id']).json['balance']

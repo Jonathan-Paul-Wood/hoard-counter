@@ -165,15 +165,27 @@ def dashboard():
 def allocation_summary(as_of):
     from .budgets import credited
     budgets = list_records('budget')
+    rows = transaction_records({'end': as_of.isoformat()})
     actuals = {r['category_id']: dec(r['amount']) for r in summarize(
-        transaction_records({'end': as_of.isoformat()}))['category_spending']}
-    credits = {}
+        rows)['category_spending']}
+    start = month_start(as_of)
+    end = as_of.replace(day=calendar.monthrange(as_of.year, as_of.month)[1])
+    monthly_actuals = {}
+    for row in rows:
+        if row['date'] >= start.isoformat():
+            key = row.get('category_id')
+            monthly_actuals[key] = monthly_actuals.get(key, ZERO) + expense_amount(row)
+    credits, monthly_credits = {}, {}
     for record in budgets:
         key = record.data['category_id']
         credits[key] = credits.get(key, ZERO) + credited(record.data, as_of)
+        before_month = credited(record.data, start - timedelta(days=1)) if start > date.min else ZERO
+        monthly_credits[key] = monthly_credits.get(key, ZERO) + credited(record.data, end) - before_month
     names = {r.id: r.data['name'] for r in list_records('category')}
     items = [dict(category_id=key, name=names.get(key, 'Uncategorized'),
                   budget=text(credits.get(key, ZERO)), actual=text(actuals.get(key, ZERO)),
+                  monthly_budget=text(monthly_credits.get(key, ZERO)),
+                  monthly_actual=text(monthly_actuals.get(key, ZERO)),
                   remaining=text(credits.get(key, ZERO) - actuals.get(key, ZERO)))
              for key in credits]
     total_budget, total_actual = sum(credits.values(), ZERO), sum((actuals.get(key, ZERO) for key in credits), ZERO)
