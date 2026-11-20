@@ -92,7 +92,7 @@ def test_forecast_excludes_recurring_and_transfers(household, monkeypatch):
     for month in ('07', '08', '09'):
         create('transactions', expense(account, category, '30', f'2026-{month}-01'))
         create('transactions', expense(account, category, '10', f'2026-{month}-15', subscription_id=sub['id'], subscription_date=f'2026-{month}-15'))
-    other = create('accounts', {'name': 'Savings', 'type': 'Savings', 'currency': 'USD'})
+    other = create('accounts', {'name': 'Savings', 'type': 'Savings', 'currency': 'USD', 'opening_date': '2024-01-01'})
     create('transactions', {'type': 'Transfer', 'date': '2026-09-03', 'source_account_id': account['id'], 'destination_account_id': other['id'], 'amount': '500', 'description': 'Savings transfer'})
     forecast = client.get('/api/v1/forecast?horizon=month').json
     assert forecast['history_months'] == ['2026-07', '2026-08', '2026-09']

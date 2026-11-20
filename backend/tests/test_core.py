@@ -76,18 +76,96 @@ def test_close_account_validates_date(app, closed_on):
         save_record("account", {"closed_on": closed_on}, None, checking.id, checking.revision)
 
 
-def test_closed_account_date_applies_to_both_sides_and_edits(app):
+def test_archived_account_rejects_new_transactions_on_both_sides(app):
     checking, other = account(opening="0"), account("Other")
     save_record("account", {"closed_on": "2025-01-10"}, None, checking.id, checking.revision)
-    # Historical and closing-day transactions are allowed.
-    incoming = transaction(other.id, checking.id, "10", "2025-01-09")
-    outgoing = transaction(checking.id, other.id, "10", "2025-01-10")
     for source, dest in [(other, checking), (checking, other)]:
-        with pytest.raises(ApiError, match="was closed on"):
-            transaction(source.id, dest.id, "10", "2025-01-11")
-    with pytest.raises(ApiError, match="was closed on"):
-        save_record("transaction", {"date": "2025-01-11"}, None, outgoing.id, outgoing.revision)
-    assert incoming.data["date"] == "2025-01-09"
+        for when in ("2025-01-09", "2025-01-10", "2025-01-11"):
+            with pytest.raises(ApiError):
+                transaction(source.id, dest.id, "10", when)
+    assert account_balance(checking.id) == 0
+
+
+@pytest.mark.parametrize("field,value", [
+    ("amount", "9"), ("destination_amount", "9"), ("date", "2025-01-09"),
+    ("currency", "EUR"), ("destination_currency", "EUR"),
+    ("fx_rate", "2"), ("destination_fx_rate", "2"),
+    ("source_account_id", "other"), ("destination_account_id", "other"),
+])
+@pytest.mark.parametrize("archived_side", ["source", "destination"])
+def test_archived_transaction_financial_fields_are_locked(app, field, value, archived_side):
+    checking, other = account(), account("Other")
+    spent = transaction(checking.id, other.id, "100", "2025-01-10")
+    archived = checking if archived_side == "source" else other
+    if archived_side == "destination":
+        transaction(other.id, checking.id, "200", "2025-01-10")
+    save_record("account", {"closed_on": "2025-01-10"}, None, archived.id, archived.revision)
+    if value == "other":
+        value = account("Replacement", "0").id
+    save_record("rate", {"currency": "EUR", "date": "2025-01-01", "rate": "1.2"}, None)
+    with pytest.raises(ApiError), db.session.begin_nested():
+        save_record("transaction", {field: value}, None, spent.id, spent.revision)
+    assert account_balance(archived.id) == 0
+
+
+def test_archived_transaction_metadata_remains_editable(app):
+    checking = account()
+    spent = transaction(checking.id, system_id("expense"), "100", "2025-01-10", "Expense")
+    save_record("account", {"closed_on": "2025-01-10"}, None, checking.id, checking.revision)
+    category = save_record("category", {"name": "Food"}, None)
+    tag = save_record("tag", {"name": "Reviewed"}, None)
+    saved = save_record("transaction", {
+        "description": "Updated", "category_id": category.id, "tag_ids": [tag.id],
+        "notes": "Reviewed receipt", "amount": "100.00",
+    }, None, spent.id, spent.revision)
+    assert saved.data["description"] == "Updated"
+    assert saved.data["category_id"] == category.id
+    assert saved.data["tag_ids"] == [tag.id]
+    assert saved.data["notes"] == "Reviewed receipt"
+    assert saved.data["date"] == "2025-01-10"
+    assert account_balance(checking.id) == 0
+    assert_balanced()
+
+
+def test_existing_transaction_cannot_move_into_archived_account(app):
+    checking, other, archived = account(), account("Other"), account("Archived", "0")
+    saved = transaction(checking.id, other.id)
+    save_record("account", {"closed_on": "2025-01-10"}, None, archived.id, archived.revision)
+    for field in ("source_account_id", "destination_account_id"):
+        with pytest.raises(ApiError, match="archived accounts"), db.session.begin_nested():
+            save_record("transaction", {field: archived.id}, None, saved.id, saved.revision)
+
+
+def test_archived_return_allows_metadata_but_locks_amount_and_date(app):
+    investment = account(opening="0", typ="Brokerage")
+    gain = transaction(investment.id, investment.id, typ="Return")
+    transaction(investment.id, investment.id, "-10", typ="Return")
+    save_record("account", {"closed_on": "2025-01-10"}, None, investment.id, investment.revision)
+    with pytest.raises(ApiError, match="archived accounts"), db.session.begin_nested():
+        transaction(investment.id, investment.id, typ="Return")
+    for patch in ({"amount": "20"}, {"date": "2025-01-06"}):
+        with pytest.raises(ApiError, match="cannot be changed"), db.session.begin_nested():
+            save_record("transaction", patch, None, gain.id, gain.revision)
+    saved = save_record("transaction", {"description": "Reviewed return"}, None, gain.id, gain.revision)
+    assert saved.data["description"] == "Reviewed return"
+    assert account_balance(investment.id) == 0
+
+
+@pytest.mark.parametrize("side", ["source", "destination"])
+def test_transaction_opening_date_applies_to_creation_and_edits(app, side):
+    earlier, later = account(), account("Later")
+    save_record("account", {"opening_date": "2025-01-05"}, None, later.id, later.revision)
+    source, destination = (later, earlier) if side == "source" else (earlier, later)
+    with pytest.raises(ApiError, match="opened on"), db.session.begin_nested():
+        transaction(source.id, destination.id, when="2025-01-04")
+    saved = transaction(source.id, destination.id, when="2025-01-05")
+    with pytest.raises(ApiError, match="opened on"), db.session.begin_nested():
+        save_record("transaction", {"date": "2025-01-04"}, None, saved.id, saved.revision)
+    saved = save_record("transaction", {"date": "2025-01-06"}, None, saved.id, saved.revision)
+    newest = account("Newest")
+    save_record("account", {"opening_date": "2025-01-07"}, None, newest.id, newest.revision)
+    with pytest.raises(ApiError, match="opened on"), db.session.begin_nested():
+        save_record("transaction", {f"{side}_account_id": newest.id}, None, saved.id, saved.revision)
 
 
 def test_closed_account_blocks_later_valuations_and_reconciliations(app):

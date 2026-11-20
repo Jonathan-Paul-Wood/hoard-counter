@@ -518,11 +518,11 @@ export function TransactionTable({
                 </div>
               </td>
               <td
-                className={`number amount ${t.type === "Income" || t.type === "Return" || t.is_refund ? "positive" : ""}`}
+                className={`number amount ${Number(t.amount) < 0 || (t.type === "Expense" && !t.is_refund) ? "negative" : t.type === "Income" || t.type === "Return" || t.is_refund ? "positive" : ""}`}
               >
                 {t.type === "Expense" && !t.is_refund
                   ? "−"
-                  : t.type === "Transfer"
+                  : t.type === "Transfer" || Number(t.amount) < 0
                     ? ""
                     : "+"}
                 {money(

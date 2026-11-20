@@ -203,6 +203,10 @@ def _validate_transaction(data, existing=None, preserve_snapshots=False, histori
     required_text(data, "description", 1000)
     data["date"] = date_string(data.get("date"))
     if not historical:
+        for account in (source, destination):
+            opening_date = account.data.get("opening_date")
+            if opening_date and data["date"] < opening_date:
+                raise ApiError(f"{account.data['name']} opened on {opening_date}; choose a date on or after opening", 409, "account_not_open")
         validate_account_date(source, data["date"])
         validate_account_date(destination, data["date"])
     sclass, dclass = source.data["account_class"], destination.data["account_class"]
@@ -257,6 +261,21 @@ def _validate_transaction(data, existing=None, preserve_snapshots=False, histori
     if data.get("subscription_date"):
         data["subscription_date"] = date_string(data["subscription_date"], "subscription_date")
     return source, destination
+
+
+def _validate_archived_transaction(data, existing):
+    account_ids = {data["source_account_id"], data["destination_account_id"]}
+    if existing:
+        account_ids.update(existing.data[field] for field in ("source_account_id", "destination_account_id"))
+    if not any(get_record("account", account_id, True).data.get("closed_on") for account_id in account_ids):
+        return
+    if not existing or existing.deleted:
+        raise ApiError("New transactions cannot be added to archived accounts", 409, "account_archived")
+    fields = ("type", "date", "source_account_id", "destination_account_id", "currency", "destination_currency")
+    amounts = ("amount", "destination_amount", "fx_rate", "destination_fx_rate")
+    if (any(data.get(field) != existing.data.get(field) for field in fields)
+            or any(decimal(data[field]) != decimal(existing.data[field]) for field in amounts)):
+        raise ApiError("The accounts, date, amounts, and currencies of transactions in archived accounts cannot be changed", 409, "account_archived")
 
 
 def _validate(kind, data, existing, preserve_snapshots=False, historical=False):
@@ -641,6 +660,9 @@ def save_record(kind, data, actor, record_id=None, expected_revision=None, origi
         if not existing and apply_rules:
             merged = apply_transaction_rules(merged)
             _validate_transaction(merged, existing, preserve_snapshots, historical)
+        # Full archives restore closed accounts before their historical transactions.
+        if not historical and not (origin == "import" and not apply_rules):
+            _validate_archived_transaction(merged, existing)
         if not explicit_unlink and not incoming.get("deleted") and (apply_rules or merged.get("subscription_id")) and (not existing or any(merged.get(k) != existing.data.get(k) for k in ("subscription_id", "subscription_date", "amount", "date", "source_account_id", "destination_account_id"))):
             _link_subscription(merged, rid)
     record = existing or Record(id=rid or new_id(), kind=kind)
