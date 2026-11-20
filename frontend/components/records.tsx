@@ -79,7 +79,12 @@ export function useFields(resource: string): FieldSpec[] {
   const specs: Record<string, FieldSpec[]> = {
     accounts: [
       { name: "name", label: "Account name", required: true, wide: true },
-      { name: "description", label: "Description", type: "textarea", wide: true },
+      {
+        name: "description",
+        label: "Description",
+        type: "textarea",
+        wide: true,
+      },
       {
         name: "account_number",
         label: "Account number (optional)",
@@ -233,13 +238,6 @@ export function useFields(resource: string): FieldSpec[] {
     ],
     budgets: [
       {
-        name: "month",
-        label: "Month",
-        type: "month",
-        required: true,
-        default: monthNow(),
-      },
-      {
         name: "category_id",
         label: "Category",
         type: "select",
@@ -248,10 +246,45 @@ export function useFields(resource: string): FieldSpec[] {
       },
       {
         name: "amount",
-        label: "Monthly target (USD)",
+        label: "Amount per occurrence (USD)",
         type: "decimal",
         required: true,
-        wide: true,
+      },
+      {
+        name: "start_date",
+        label: "Start date",
+        type: "date",
+        required: true,
+        default: today(),
+        hint: "The first credit occurs on this date.",
+      },
+      {
+        name: "end_date",
+        label: "End date",
+        type: "date",
+        hint: "Inclusive. Leave blank to continue indefinitely.",
+      },
+      {
+        name: "frequency",
+        label: "Repeat every",
+        type: "integer",
+        required: true,
+        default: 1,
+        min: "1",
+        step: "1",
+      },
+      {
+        name: "period",
+        label: "Period",
+        type: "select",
+        required: true,
+        default: "month",
+        options: [
+          { value: "day", label: "Days" },
+          { value: "week", label: "Weeks" },
+          { value: "month", label: "Months" },
+          { value: "year", label: "Years" },
+        ],
       },
     ],
     users: [
@@ -425,9 +458,11 @@ export function DeleteDialog({
       <p className="dialog-copy">
         {resource === "transactions"
           ? "This removes the transaction from active balances and reports. Its original values remain in the audit history."
-          : resource === "accounts"
-            ? `Remove “${record.name}” from active accounts? Only unused accounts with a zero opening balance can be removed. Audit history is retained; linked records must be unlinked first.`
-            : `Remove “${record.name || record.description || record.date || "this record"}”? Records in use may need to be unlinked first.`}
+          : resource === "budgets"
+            ? "Deleting this budget removes all of its credits and recalculates the category allocation. To preserve past credits, edit the budget's end date instead."
+            : resource === "accounts"
+              ? `Remove “${record.name}” from active accounts? Only unused accounts with a zero opening balance can be removed. Audit history is retained; linked records must be unlinked first.`
+              : `Remove “${record.name || record.description || record.date || "this record"}”? Records in use may need to be unlinked first.`}
       </p>
       <ErrorBox error={error} />
       <div className="modal-footer">

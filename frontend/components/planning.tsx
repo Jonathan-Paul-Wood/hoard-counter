@@ -2,13 +2,12 @@
 
 import { HoardEggIcon } from "./hoard-art";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import {
   ArrowDownLeft,
   ArrowUpRight,
   CalendarDays,
   ChevronRight,
-  Copy,
   Download,
   Plus,
   Trash2,
@@ -19,7 +18,6 @@ import {
   Entity,
   errorMessage,
   decimalSum,
-  decimalSubtract,
   percentageToRate,
   money,
   monthNow,
@@ -258,167 +256,283 @@ export function Dashboard() {
 }
 
 export function Budgets() {
-  const { version, notify, refresh } = useApp();
-  const [month, setMonth] = useState(monthNow());
+  const { version, categories } = useApp();
+  const [asOf, setAsOf] = useState(today());
   const [editor, setEditor] = useState<Entity | null | undefined>();
-  const [copy, setCopy] = useState(false);
-  const [source, setSource] = useState(() => {
-    const d = new Date();
-    d.setDate(1);
-    d.setMonth(d.getMonth() - 1);
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-  });
-  const [error, setError] = useState("");
-  const [busy, setBusy] = useState(false);
   const [removed, setRemoved] = useState<Entity | null>(null);
-  const [categoryPreset, setCategoryPreset] = useState("");
-  const fields = useFields("budgets").map((f) =>
-    f.name === "month"
-      ? { ...f, default: month }
-      : f.name === "category_id"
-        ? { ...f, default: categoryPreset }
-        : f,
-  );
-  const summary = useLoad<any>(
-    `/budget-summary?month=${month}`,
-    { items: [], total_budget: "0", total_actual: "0" },
-    version,
-  );
-  const records = useLoad<any>(
-    `/budgets?month=${month}&page_size=100`,
-    { items: [] },
-    version,
-  );
-  async function copyBudget(e: React.FormEvent) {
-    e.preventDefault();
-    setBusy(true);
-    try {
-      await api("/budgets/copy", {
-        method: "POST",
-        body: JSON.stringify({ source_month: source, target_month: month }),
-      });
-      notify("Budget copied.");
-      refresh();
-      setCopy(false);
-    } catch (e) {
-      setError(errorMessage(e));
-    } finally {
-      setBusy(false);
+  const [projection, setProjection] = useState(false);
+  const [showEnded, setShowEnded] = useState(true);
+  const [excludedCategories, setExcludedCategories] = useState<string[]>([]);
+  const categoryDropdown = useRef<HTMLDetailsElement>(null);
+  useEffect(() => {
+    function closeOutside(event: Event) {
+      const dropdown = categoryDropdown.current;
+      if (
+        dropdown &&
+        event.target instanceof Node &&
+        !dropdown.contains(event.target)
+      ) {
+        dropdown.open = false;
+      }
     }
-  }
+    document.addEventListener("pointerdown", closeOutside);
+    document.addEventListener("focusin", closeOutside);
+    return () => {
+      document.removeEventListener("pointerdown", closeOutside);
+      document.removeEventListener("focusin", closeOutside);
+    };
+  }, []);
+  const fields = useFields("budgets");
+  const summary = useLoad<any>(
+    `/budget-summary?as_of=${asOf}`,
+    { items: [], total_budget: "0", total_actual: "0", total_allocation: "0" },
+    version,
+  );
+  const [budgets, setBudgets] = useState<{
+    items: Entity[];
+    loading: boolean;
+    error: string;
+  }>({ items: [], loading: true, error: "" });
+  useEffect(() => {
+    let active = true;
+    setBudgets((current) => ({ ...current, loading: true, error: "" }));
+    async function load() {
+      const items: Entity[] = [];
+      for (let page = 1; ; page++) {
+        const result = await api<{ items: Entity[]; total: number }>(
+          `/budgets?page_size=100&page=${page}`,
+        );
+        items.push(...result.items);
+        if (!result.items.length || items.length >= result.total) break;
+      }
+      if (active) setBudgets({ items, loading: false, error: "" });
+    }
+    load().catch((e) => {
+      if (active)
+        setBudgets({ items: [], loading: false, error: errorMessage(e) });
+    });
+    return () => {
+      active = false;
+    };
+  }, [version]);
+  const names: Record<string, string> = Object.fromEntries(
+    categories.map((item: Entity) => [item.id, item.name]),
+  );
+  const filterCategories: Entity[] = [...categories].sort(
+    (a: Entity, b: Entity) => a.name.localeCompare(b.name),
+  );
+  const selectedCount = filterCategories.filter(
+    (category) => !excludedCategories.includes(category.id),
+  ).length;
+  const visibleBudgets = budgets.items.filter(
+    (record) =>
+      (showEnded || !record.end_date || record.end_date >= today()) &&
+      !excludedCategories.includes(record.category_id),
+  );
   return (
     <>
       <PageHead
-        title="Make room for what matters"
-        subtitle="A monthly plan that grows with your hoard."
+        title="Budgets and allocations"
+        subtitle="Recurring credits minus category expenses. Balances carry forward after a budget ends."
         action={
           <>
             <input
-              aria-label="Budget month"
-              type="month"
-              value={month}
-              onChange={(e) => setMonth(e.target.value)}
+              aria-label="Allocation date"
+              type="date"
+              required
+              value={asOf}
+              onChange={(e) => {
+                if (e.target.value) setAsOf(e.target.value);
+              }}
             />
-            <Button variant="secondary" onClick={() => setCopy(true)}>
-              <Copy size={15} />
-              Copy month
+            <Button
+              variant="secondary"
+              disabled={
+                budgets.loading || !!budgets.error || !budgets.items.length
+              }
+              onClick={() => setProjection(true)}
+            >
+              Projection
             </Button>
-            <AddButton onClick={() => setEditor(null)}>Set a budget</AddButton>
+            <AddButton onClick={() => setEditor(null)}>New budget</AddButton>
           </>
         }
       />
       <div className="stats three">
         <Stat
-          label="Monthly plan"
+          label="Budget credits to date"
           value={money(summary.data.total_budget)}
           accent
         />
-        <Stat label="Spent so far" value={money(summary.data.total_actual)} />
         <Stat
-          label="Remaining"
-          value={money(
-            decimalSubtract(
-              summary.data.total_budget,
-              summary.data.total_actual,
-            ),
-          )}
-          hint="Plan minus actual expenses"
+          label="Net expenses to date"
+          value={money(summary.data.total_actual)}
+        />
+        <Stat
+          label="Allocation"
+          value={money(summary.data.total_allocation)}
+          hint={`As of ${prettyDate(asOf)}`}
         />
       </div>
       <Panel
-        title="Category budgets"
-        subtitle="Transfers are excluded. Refunds reduce spending on their recorded date."
+        title="Allocations"
+        subtitle="Bars compare spending so far in the selected month with that month's full expected budget credits. Allocation balances carry forward. Refunds reduce expenses."
       >
         <ErrorBox error={summary.error} />
         {summary.loading ? (
           <Loading />
         ) : summary.data.items.length ? (
           <div className="budget-list">
-            {summary.data.items.map((item: any) => {
-              const record = records.data.items.find(
-                (r: Entity) => r.category_id === item.category_id,
-              );
-              const percent =
-                Number(item.budget) > 0
-                  ? (Number(item.actual) / Number(item.budget)) * 100
-                  : 0;
-              return (
-                <div className="budget-row" key={item.category_id || "none"}>
-                  <div className="budget-main">
-                    <div className="budget-title">
-                      <strong>{item.name || "Uncategorized"}</strong>
-                      <span
-                        className={Number(item.remaining) < 0 ? "negative" : ""}
-                      >
-                        {money(item.remaining)}{" "}
-                        {Number(item.remaining) < 0 ? "over" : "left"}
-                      </span>
-                    </div>
-                    <div className="bar-track">
-                      <span
-                        className={percent > 100 ? "over" : ""}
-                        style={{
-                          width: `${Math.min(Math.max(percent, 0), 100)}%`,
-                        }}
-                      />
-                    </div>
-                    <div className="budget-caption">
-                      <span>{money(item.actual)} spent</span>
-                      <span>of {money(item.budget)} planned</span>
-                    </div>
-                  </div>
-                  <div className="budget-actions">
-                    <Button
-                      variant="text"
-                      onClick={() => {
-                        setCategoryPreset(item.category_id || "");
-                        setEditor(record || null);
-                      }}
+            {summary.data.items.map((item: any) => (
+              <div className="budget-row" key={item.category_id}>
+                <div className="budget-main">
+                  <div className="budget-title">
+                    <strong>{item.name}</strong>
+                    <span
+                      className={Number(item.remaining) < 0 ? "negative" : ""}
                     >
-                      {record ? "Adjust" : "Set target"}
-                    </Button>
-                    {record && (
-                      <button
-                        className="icon-button subtle-danger"
-                        title="Remove target"
-                        onClick={() => setRemoved(record)}
-                      >
-                        <Trash2 size={15} />
-                      </button>
-                    )}
+                      {money(item.remaining)}
+                    </span>
+                  </div>
+                  <BudgetSpendingBar item={item} />
+                  <div className="budget-caption">
+                    <span>{money(item.budget)} credited</span>
+                    <span>{money(item.actual)} net expenses</span>
                   </div>
                 </div>
-              );
-            })}
+              </div>
+            ))}
           </div>
         ) : (
           <Empty
-            title="Give your money a direction"
-            message="Choose a category and a monthly target to start your plan."
-            action={
-              <AddButton onClick={() => setEditor(null)}>
-                Create your first budget
-              </AddButton>
+            title="No allocations yet"
+            message="Create a budget to start tracking a category."
+          />
+        )}
+      </Panel>
+      <Panel
+        title="Budget schedules"
+        className="budget-schedules"
+        subtitle="One active budget per category at a time. End a schedule to preserve its credits and start another later."
+      >
+        <div className="budget-schedule-filters">
+          <Button
+            variant="secondary"
+            aria-pressed={showEnded}
+            onClick={() => setShowEnded((current) => !current)}
+          >
+            {showEnded ? "Hide ended budgets" : "Show ended budgets"}
+          </Button>
+          <details
+            ref={categoryDropdown}
+            className="budget-category-filter"
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.currentTarget.open = false;
+                event.currentTarget.querySelector("summary")?.focus();
+              }
+            }}
+          >
+            <summary className="button secondary">
+              Categories (
+              {selectedCount === filterCategories.length
+                ? "All"
+                : selectedCount}
+              ) <ChevronRight size={14} />
+            </summary>
+            <div className="budget-category-options">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={selectedCount === filterCategories.length}
+                  onChange={(event) =>
+                    setExcludedCategories(
+                      event.target.checked
+                        ? []
+                        : filterCategories.map((category) => category.id),
+                    )
+                  }
+                />
+                All categories
+              </label>
+              {filterCategories.map((category) => (
+                <label key={category.id}>
+                  <input
+                    type="checkbox"
+                    checked={!excludedCategories.includes(category.id)}
+                    onChange={(event) =>
+                      setExcludedCategories((current) =>
+                        event.target.checked
+                          ? current.filter((id) => id !== category.id)
+                          : [...current, category.id],
+                      )
+                    }
+                  />
+                  {category.name}
+                </label>
+              ))}
+              {!filterCategories.length && <p>No categories yet.</p>}
+            </div>
+          </details>
+        </div>
+        <ErrorBox error={budgets.error} />
+        {budgets.loading ? (
+          <Loading />
+        ) : visibleBudgets.length ? (
+          <div className="budget-list">
+            {visibleBudgets.map((record: Entity) => (
+              <div className="budget-row" key={record.id}>
+                <div className="budget-main">
+                  <div className="budget-title">
+                    <strong>{names[record.category_id] || "Category"}</strong>
+                    <span>
+                      {money(record.amount)} every {record.frequency}{" "}
+                      {record.period}
+                      {record.frequency === 1 ? "" : "s"}
+                    </span>
+                  </div>
+                  <div className="budget-caption">
+                    <span>
+                      {prettyDate(record.start_date)} –{" "}
+                      {record.end_date
+                        ? prettyDate(record.end_date)
+                        : "No end date"}
+                    </span>
+                    <span>
+                      {record.start_date > today()
+                        ? "Upcoming"
+                        : record.end_date && record.end_date < today()
+                          ? "Ended"
+                          : "Active"}
+                    </span>
+                  </div>
+                </div>
+                <div className="budget-actions">
+                  <Button variant="text" onClick={() => setEditor(record)}>
+                    Edit
+                  </Button>
+                  <button
+                    className="icon-button subtle-danger"
+                    title="Delete budget and its credits"
+                    onClick={() => setRemoved(record)}
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <Empty
+            title={
+              budgets.items.length
+                ? "No schedules match your filters"
+                : "Create your first budget"
+            }
+            message={
+              budgets.items.length
+                ? "Show ended budgets or select more categories to see their schedules."
+                : "Choose a category, amount, and recurrence."
             }
           />
         )}
@@ -431,46 +545,200 @@ export function Budgets() {
           record={editor || undefined}
           onClose={() => setEditor(undefined)}
         />
-      )}{" "}
+      )}
       {removed && (
         <DeleteDialog
           resource="budgets"
           record={removed}
           onClose={() => setRemoved(null)}
         />
-      )}{" "}
-      {copy && (
-        <Modal
-          title="Copy a monthly budget"
-          subtitle={`Copy category targets into ${month}.`}
-          onClose={() => setCopy(false)}
-        >
-          <form onSubmit={copyBudget}>
-            <div className="form-grid">
-              <Field label="Copy from month">
-                <input
-                  required
-                  type="month"
-                  value={source}
-                  onChange={(e) => setSource(e.target.value)}
-                />
-              </Field>
-            </div>
-            <ErrorBox error={error} />
-            <div className="modal-footer">
-              <Button
-                type="button"
-                variant="secondary"
-                onClick={() => setCopy(false)}
-              >
-                Cancel
-              </Button>
-              <Button busy={busy}>Copy targets</Button>
-            </div>
-          </form>
-        </Modal>
+      )}
+      {projection && (
+        <BudgetProjection
+          budgets={budgets.items}
+          names={names}
+          onClose={() => setProjection(false)}
+        />
       )}
     </>
+  );
+}
+
+function BudgetSpendingBar({ item }: { item: any }) {
+  const spent = Number(item.monthly_actual);
+  const expected = Number(item.monthly_budget);
+  const percent =
+    expected > 0
+      ? Math.max(0, (spent / expected) * 100)
+      : spent > 0
+        ? Infinity
+        : 0;
+  const width = Math.min(percent, 100);
+  const color =
+    percent > 100 ? "#ee7d62" : percent >= 80 ? "#dee302" : "#315b46";
+  const description = `${money(item.monthly_actual)} spent this month of ${money(item.monthly_budget)} expected${Number.isFinite(percent) ? ` (${percent.toFixed(1)}%)` : " (no credits expected)"}`;
+  return (
+    <>
+      <div
+        className="budget-spending-bar"
+        role="progressbar"
+        aria-label={`${item.name} monthly spending`}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={width}
+        aria-valuetext={description}
+        title={description}
+      >
+        <span style={{ width: `${width}%`, backgroundColor: color }} />
+      </div>
+      <div className="budget-caption">
+        <span>{money(item.monthly_actual)} spent this month</span>
+        <span>of {money(item.monthly_budget)} expected</span>
+      </div>
+    </>
+  );
+}
+
+function BudgetProjection({
+  budgets,
+  names,
+  onClose,
+}: {
+  budgets: Entity[];
+  names: Record<string, string>;
+  onClose: () => void;
+}) {
+  const tomorrow = new Date(`${today()}T12:00:00`);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  const minDate = `${tomorrow.getFullYear()}-${String(tomorrow.getMonth() + 1).padStart(2, "0")}-${String(tomorrow.getDate()).padStart(2, "0")}`;
+  const [date, setDate] = useState(minDate);
+  const [selected, setSelected] = useState<string[]>(budgets.map((b) => b.id));
+  const [result, setResult] = useState<any>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  async function calculate(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setError("");
+    setResult(null);
+    try {
+      setResult(
+        await api("/budget-projections", {
+          method: "POST",
+          body: JSON.stringify({ date, budget_ids: selected }),
+        }),
+      );
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Modal
+      wide
+      title="Budget projection"
+      subtitle="Estimate future allocations using selected budget credits and scheduled subscriptions. Projections are not saved."
+      onClose={onClose}
+    >
+      <form className="budget-projection-form" onSubmit={calculate}>
+        <Field label="Future date">
+          <input
+            type="date"
+            required
+            disabled={busy}
+            min={minDate}
+            value={date}
+            onChange={(e) => {
+              setDate(e.target.value);
+              setResult(null);
+            }}
+          />
+        </Field>
+        <fieldset
+          className="plain-fieldset budget-projection-options"
+          disabled={busy}
+        >
+          <legend>Include budgets</legend>
+          {budgets.map((b) => (
+            <label className="budget-projection-option" key={b.id}>
+              <input
+                type="checkbox"
+                checked={selected.includes(b.id)}
+                onChange={(e) => {
+                  setSelected((current) =>
+                    e.target.checked
+                      ? [...current, b.id]
+                      : current.filter((id) => id !== b.id),
+                  );
+                  setResult(null);
+                }}
+              />
+              {names[b.category_id] || "Category"}: {money(b.amount)} every{" "}
+              {b.frequency} {b.period}
+              {b.frequency === 1 ? "" : "s"} ({prettyDate(b.start_date)} –{" "}
+              {b.end_date ? prettyDate(b.end_date) : "ongoing"})
+            </label>
+          ))}
+        </fieldset>
+        <p className="muted">
+          Existing allocations are carried forward. Unchecked schedules add no
+          future credits. Future recorded expenses are included; linked
+          subscription payments are counted once. Subscription estimates use
+          current exchange rates.
+        </p>
+        <ErrorBox error={error} />
+        <div className="modal-footer">
+          <Button type="button" variant="secondary" onClick={onClose}>
+            Close
+          </Button>
+          <Button busy={busy} disabled={!selected.length}>
+            Calculate projection
+          </Button>
+        </div>
+      </form>
+      {result && (
+        <div className="budget-projection-results" aria-live="polite">
+          <h3>Estimated allocations on {prettyDate(result.date)}</h3>
+          {result.items.map((item: any) => (
+            <div className="budget-row" key={item.category_id}>
+              <div className="budget-main">
+                <div className="budget-title">
+                  <strong>{item.name}</strong>
+                  <span
+                    className={
+                      Number(item.projected_allocation) < 0 ? "negative" : ""
+                    }
+                  >
+                    {money(item.projected_allocation)}
+                  </span>
+                </div>
+                <div className="budget-caption">
+                  <span>
+                    Current {money(item.current_allocation)} + credits{" "}
+                    {money(item.future_credits)}
+                  </span>
+                  <span>
+                    Recorded {money(item.recorded_expenses)} + subscriptions{" "}
+                    {money(item.subscription_expenses)}
+                  </span>
+                </div>
+                {item.warnings.map((warning: string) => (
+                  <p className="negative" key={warning}>
+                    {warning}
+                  </p>
+                ))}
+              </div>
+            </div>
+          ))}
+          {result.incomplete && (
+            <p className="negative">
+              Estimate is incomplete because exchange rates are missing.
+            </p>
+          )}
+        </div>
+      )}
+    </Modal>
   );
 }
 
