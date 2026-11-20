@@ -308,7 +308,10 @@ export function TransactionEditor({
   const currencies = (meta.currencies || []).map((c: any) =>
     typeof c === "string" ? c : c.code,
   );
-  const sourceOptions = accounts.filter((a: Entity) =>
+  const eligibleAccounts = accounts.filter(
+    (a: Entity) => !a.closed_on || values.date <= a.closed_on,
+  );
+  const sourceOptions = eligibleAccounts.filter((a: Entity) =>
     values.type === "Return"
       ? a.account_class === "asset" &&
         (meta.investment_account_types.includes(a.type) ||
@@ -319,7 +322,7 @@ export function TransactionEditor({
           ? a.account_class === "expense"
           : ["asset", "liability"].includes(a.account_class),
   );
-  const destOptions = accounts.filter((a: Entity) =>
+  const destOptions = eligibleAccounts.filter((a: Entity) =>
     values.type === "Expense" && !values.is_refund
       ? a.account_class === "expense"
       : values.type === "Return"
@@ -444,7 +447,9 @@ export function TransactionEditor({
             </Field>
             <Field
               label={
-                values.type === "Return" ? "Asset or investment account" : "From account"
+                values.type === "Return"
+                  ? "Asset or investment account"
+                  : "From account"
               }
             >
               <select

@@ -39,6 +39,67 @@ def assert_balanced():
         assert sum((Decimal(p.usd_amount) for p in postings), Decimal(0)) == 0
 
 
+def test_close_account_preserves_history_and_reporting(app):
+    from whc.analytics import balance_summary, transaction_records, summarize
+    checking = account()
+    spent = transaction(checking.id, system_id("expense"), "100", "2025-01-10", "Expense")
+    save_record("account", {"closed_on": "2025-01-10"}, None, checking.id, checking.revision)
+    assert not checking.deleted
+    assert checking in list_records("account")
+    assert get_record("transaction", spent.id).data["amount"] == "100"
+    assert balance_summary(date(2025, 1, 9))["net_worth"] == "100"
+    rows = transaction_records({"start": "2025-01-01", "end": "2025-01-31", "account_id": checking.id})
+    assert summarize(rows)["summary"]["expenses"] == "100"
+    assert_balanced()
+
+
+@pytest.mark.parametrize("opening", ["100", "-100", "0.01"])
+def test_close_account_requires_exact_zero_balance(app, opening):
+    checking = account(opening=opening)
+    with pytest.raises(ApiError, match="net balance of zero"), db.session.begin_nested():
+        save_record("account", {"closed_on": "2025-01-10"}, None, checking.id, checking.revision)
+    assert not checking.data.get("closed_on")
+
+
+def test_close_account_rejects_later_activity_even_when_net_zero(app):
+    checking, other = account(opening="0"), account("Other")
+    transaction(other.id, checking.id, "10", "2025-01-11")
+    transaction(checking.id, other.id, "10", "2025-01-12")
+    with pytest.raises(ApiError, match="all existing account activity"), db.session.begin_nested():
+        save_record("account", {"closed_on": "2025-01-10"}, None, checking.id, checking.revision)
+
+
+@pytest.mark.parametrize("closed_on", ["2024-12-31", "invalid", "", False])
+def test_close_account_validates_date(app, closed_on):
+    checking = account(opening="0")
+    with pytest.raises(ApiError):
+        save_record("account", {"closed_on": closed_on}, None, checking.id, checking.revision)
+
+
+def test_closed_account_date_applies_to_both_sides_and_edits(app):
+    checking, other = account(opening="0"), account("Other")
+    save_record("account", {"closed_on": "2025-01-10"}, None, checking.id, checking.revision)
+    # Historical and closing-day transactions are allowed.
+    incoming = transaction(other.id, checking.id, "10", "2025-01-09")
+    outgoing = transaction(checking.id, other.id, "10", "2025-01-10")
+    for source, dest in [(other, checking), (checking, other)]:
+        with pytest.raises(ApiError, match="was closed on"):
+            transaction(source.id, dest.id, "10", "2025-01-11")
+    with pytest.raises(ApiError, match="was closed on"):
+        save_record("transaction", {"date": "2025-01-11"}, None, outgoing.id, outgoing.revision)
+    assert incoming.data["date"] == "2025-01-09"
+
+
+def test_closed_account_blocks_later_valuations_and_reconciliations(app):
+    from whc.ledger import reconcile_account
+    checking = account(opening="0", typ="Brokerage")
+    save_record("account", {"closed_on": "2025-01-10"}, None, checking.id, checking.revision)
+    with pytest.raises(ApiError, match="was closed on"):
+        save_record("valuation", {"account_id": checking.id, "date": "2025-01-11", "amount": "20"}, None)
+    with pytest.raises(ApiError, match="was closed on"):
+        reconcile_account(checking.id, "20", "2025-01-11", None, checking.revision)
+
+
 def test_remove_unused_account_voids_zero_opening(app):
     unused = account(opening="0")
     opening = get_record("transaction", system_id("journal/opening/" + unused.id))

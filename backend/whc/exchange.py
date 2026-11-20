@@ -19,7 +19,7 @@ from flask import Blueprint, current_app, g, jsonify, request, send_file
 from .auth import login_required
 from .models import db, Record, AuditEvent, utcnow
 from .ledger import (save_record, list_records, add_audit, get_record, _replace_postings,
-                     system_id, rebuild_account_valuations)
+                     system_id, rebuild_account_valuations, validate_account_closure, validate_account_date)
 from .validation import ApiError, timestamp, identifier, amount, decimal, date_string, money, currency_code
 from .files import attachment_path, identify, MAX_FILE, safe_filename
 from .firefly import parse_firefly
@@ -28,7 +28,7 @@ bp = Blueprint('exchange', __name__)
 VERSION = 1
 LIMIT = 100 * 1024 * 1024
 ORDER = ['currency', 'rate', 'category', 'tag', 'account', 'subscription', 'rule', 'budget', 'transaction', 'valuation', 'scenario', 'attachment', 'setting']
-ACCOUNT_FIELDS = ['id', 'name', 'description', 'account_number', 'type', 'account_class', 'currency', 'opening_balance', 'opening_currency', 'opening_date', 'balance', 'last_modified', 'deleted']
+ACCOUNT_FIELDS = ['id', 'name', 'description', 'account_number', 'type', 'account_class', 'currency', 'opening_balance', 'opening_currency', 'opening_date', 'closed_on', 'balance', 'last_modified', 'deleted']
 TRANSACTION_FIELDS = ['id', 'type', 'source_account_id', 'destination_account_id', 'date', 'amount', 'currency', 'destination_amount', 'destination_currency', 'description', 'category_id', 'tag_ids', 'notes', 'subscription_id', 'subscription_date', 'is_refund', 'investment_fee', 'last_modified', 'deleted']
 READONLY = {'id', 'revision', 'last_modified', 'deleted', 'balance', 'balance_usd', 'signed_balance', 'signed_balance_usd', 'postings', 'missing_rate'}
 
@@ -157,7 +157,7 @@ def parse_csv(payload, kind):
                     data[field] = value.lower() in ('true', '1')
             elif field == 'tag_ids':
                 data[field] = json.loads(value or '[]')
-            elif field in ('category_id', 'subscription_id', 'subscription_date', 'account_number'):
+            elif field in ('category_id', 'subscription_id', 'subscription_date', 'account_number', 'closed_on'):
                 if value or field in data:
                     data[field] = value or None
             elif value or field in data or field in ('description', 'name'):
@@ -323,6 +323,8 @@ def import_special(kind, data, existing, actor):
         if account.data['account_class'] not in ('asset', 'liability'):
             raise ValueError('Reconciliation applies to asset or liability accounts.')
         clean['date'] = date_string(clean['date'])
+        if not data.get('deleted'):
+            validate_account_date(account, clean['date'])
         clean['currency'] = currency_code(clean.get('currency') or account.data['currency'])
         native = decimal(amount(clean['amount'], clean['currency']))
         rate = decimal(clean['fx_rate'])
@@ -395,6 +397,8 @@ def apply_import(records, mode, actor):
             change['after'] = record.to_dict()
         changes.append(change)
     db.session.flush()
+    for account in list_records('account'):
+        validate_account_closure(account)
     return summary, changes, conflicts
 
 

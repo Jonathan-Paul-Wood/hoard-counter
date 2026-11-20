@@ -214,6 +214,35 @@ def test_account_number_search_and_csv_roundtrip(household):
     assert preview['summary']['skip'] == len(rows)
 
 
+def test_closed_account_survives_archive_roundtrip(household, tmp_path):
+    _, client, headers, create, account, category = household
+    path = '/api/v1/accounts/' + account['id']
+    failed = client.patch(path, headers=headers, json={'revision': account['revision'], 'closed_on': '2026-07-15'})
+    assert failed.status_code == 409
+    assert not client.get(path).json.get('closed_on')
+    purchase = create('transactions', expense(account, category, '1000'))
+    closed = client.patch(path, headers=headers, json={'revision': account['revision'], 'closed_on': '2026-07-15'})
+    assert closed.status_code == 200, closed.json
+    blocked = client.post('/api/v1/transactions', headers=headers, json=expense(account, category, '1', '2026-07-16'))
+    assert blocked.status_code == 409
+    assert client.get(path).json['balance'] == '0'
+    archive = client.get('/api/v1/exports?format=archive')
+    second_dir = tmp_path / 'closed-restored'
+    second = create_app({'TESTING': True, 'COOKIE_SECURE': False, 'DATA_DIR': str(second_dir), 'UPLOAD_DIR': str(second_dir / 'uploads'), 'BACKUP_DIR': str(second_dir / 'backups'), 'DATABASE_URL': 'sqlite:///' + str(second_dir / 'test.db')})
+    other = second.test_client()
+    other.post('/api/v1/auth/setup', json={'username': 'owner2', 'password': 'another correct long password'})
+    other_headers = {'X-CSRF-Token': other.get('/api/v1/auth/session').json['csrf_token']}
+    preview = other.post('/api/v1/imports/preview', headers=other_headers, data={'kind': 'archive', 'file': (io.BytesIO(archive.data), 'archive.zip')})
+    assert preview.status_code == 200 and not preview.json['errors'], preview.json
+    result = other.post('/api/v1/imports/commit', headers=other_headers, json={'token': preview.json['token']})
+    assert result.status_code == 200, result.json
+    restored = other.get(path).json
+    assert restored['closed_on'] == '2026-07-15' and restored['balance'] == '0' and not restored['deleted']
+    assert other.get('/api/v1/transactions/' + purchase['id']).status_code == 200
+    report = other.get('/api/v1/reports/data?start=2026-07-01&end=2026-07-31').json
+    assert Decimal(report['summary']['expenses']) == 1000
+
+
 def test_deleted_unused_account_survives_archive_roundtrip(household, tmp_path):
     app, client, headers, create, account, category = household
     unused = create('accounts', {'name': 'Unused', 'type': 'Savings', 'opening_balance': '0'})
