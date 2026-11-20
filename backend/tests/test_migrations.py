@@ -47,7 +47,7 @@ def test_startup_upgrades_legacy_database_and_audits_each_revision_once(installa
 
     # The file is older than its parent, as can happen when integrating branches.
     name = "2026-10-02-12-34-5678-create-example.py"
-    add_revision(directory, name, "test_example", "0002_migration_runs", ["CREATE TABLE example (id INTEGER)"])
+    add_revision(directory, name, "test_example", migrations.schema_head(), ["CREATE TABLE example (id INTEGER)"])
     for _ in range(2):
         assert create_app(app_config).test_client().get("/api/health").json == {
             "status": "ok", "schema": "test_example",
@@ -59,9 +59,9 @@ def test_startup_upgrades_legacy_database_and_audits_each_revision_once(installa
         rows = connection.execute(
             'SELECT id, migration_file, migration_date, run_on FROM "migration-runs" ORDER BY run_on'
         ).fetchall()
-    assert len(rows) == 2
+    assert len(rows) == 4
     assert rows[0][1].endswith("-record-migration-runs.py")
-    assert rows[1][1:3] == (name, "2026-10-02-12-34-5678")
+    assert rows[-1][1:3] == (name, "2026-10-02-12-34-5678")
     for identity, _, _, run_on in rows:
         assert UUID(identity).version == 4
         assert datetime.fromisoformat(run_on).utcoffset().total_seconds() == 0
@@ -80,7 +80,7 @@ def test_failed_startup_rolls_back_schema_revision_and_audit(installation):
         create_app(app_config)
     with sqlite3.connect(database) as connection:
         assert connection.execute("SELECT version_num FROM alembic_version").fetchall() == [(parent,)]
-        assert connection.execute('SELECT COUNT(*) FROM "migration-runs"').fetchone() == (1,)
+        assert connection.execute('SELECT COUNT(*) FROM "migration-runs"').fetchone() == (3,)
         assert connection.execute("SELECT name FROM sqlite_master WHERE name IN ('example', 'partial')").fetchall() == []
 
 
@@ -96,4 +96,4 @@ def test_managed_api_requires_the_deployment_to_apply_migrations(installation):
     command.upgrade(config, "head")
     assert create_app(app_config).test_client().get("/api/health").status_code == 200
     with sqlite3.connect(database) as connection:
-        assert connection.execute('SELECT COUNT(*) FROM "migration-runs"').fetchone() == (1,)
+        assert connection.execute('SELECT COUNT(*) FROM "migration-runs"').fetchone() == (3,)

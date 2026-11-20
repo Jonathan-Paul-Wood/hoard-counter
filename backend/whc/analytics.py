@@ -175,8 +175,8 @@ def allocation_summary(as_of):
     items = [dict(category_id=key, name=names.get(key, 'Uncategorized'),
                   budget=text(credits.get(key, ZERO)), actual=text(actuals.get(key, ZERO)),
                   remaining=text(credits.get(key, ZERO) - actuals.get(key, ZERO)))
-             for key in set(credits) | set(actuals)]
-    total_budget, total_actual = sum(credits.values(), ZERO), sum(actuals.values(), ZERO)
+             for key in credits]
+    total_budget, total_actual = sum(credits.values(), ZERO), sum((actuals.get(key, ZERO) for key in credits), ZERO)
     return dict(as_of=as_of.isoformat(), items=sorted(items, key=lambda r: r['name']),
                 total_budget=text(total_budget), total_actual=text(total_actual),
                 total_allocation=text(total_budget - total_actual))
@@ -197,26 +197,19 @@ def budgets_summary():
     return jsonify(allocation_summary(as_of))
 
 
-@bp.get('/budgets/<budget_id>/projection')
-@login_required
-def budget_projection(budget_id):
+def category_projection(category, selected, as_of, target):
     from .budgets import credited
-    budget = get_record('budget', budget_id)
-    as_of = today()
-    target = date.fromisoformat(date_string(request.args.get('date'), 'date'))
-    if target < as_of:
-        raise ApiError('Projection date must be today or later')
-    category = budget.data['category_id']
     current = next(r for r in allocation_summary(as_of)['items'] if r['category_id'] == category)
     credits = sum((credited(r.data, target) - credited(r.data, as_of)
-                   for r in list_records('budget') if r.data['category_id'] == category), ZERO)
+                   for r in selected if r.data['category_id'] == category), ZERO)
     rows = transaction_records({'end': target.isoformat()})
     recorded = sum((expense_amount(r) for r in rows if r.get('category_id') == category
                     and r['date'] > as_of.isoformat()), ZERO)
     # A linked occurrence is represented by its actual transaction, even when its
     # payment date or category differs from the subscription's expected values.
     fulfilled = {(r.data.get('subscription_id'), r.data.get('subscription_date'))
-                 for r in list_records('transaction') if r.data.get('subscription_id')}
+                 for r in list_records('transaction') if r.data.get('subscription_id')
+                 and r.data['date'] <= target.isoformat()}
     due, warnings = [], []
     for record in list_records('subscription'):
         sub = record.data
@@ -234,12 +227,46 @@ def budget_projection(budget_id):
         due.extend(dict(subscription_id=record.id, name=sub['name'], date=dt.isoformat(),
                         amount=text(amount)) for dt in dates)
     subscriptions = sum((dec(r['amount']) for r in due), ZERO)
-    return jsonify(category_id=category, as_of=as_of.isoformat(), date=target.isoformat(),
+    return dict(category_id=category, as_of=as_of.isoformat(), date=target.isoformat(),
                    current_allocation=current['remaining'], future_credits=text(credits),
                    recorded_expenses=text(recorded), subscription_expenses=text(subscriptions),
                    projected_allocation=text(dec(current['remaining']) + credits - recorded - subscriptions),
                    occurrences=sorted(due, key=lambda r: (r['date'], r['name'])),
                    warnings=warnings, incomplete=bool(warnings))
+
+
+@bp.post('/budget-projections')
+@login_required
+def budget_projections():
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict):
+        raise ApiError('A projection request is required')
+    as_of = today()
+    target = date.fromisoformat(date_string(payload.get('date'), 'date'))
+    if target <= as_of:
+        raise ApiError('Projection date must be in the future')
+    ids = payload.get('budget_ids')
+    if not isinstance(ids, list) or any(not isinstance(key, str) for key in ids):
+        raise ApiError('budget_ids must be an array of budget IDs')
+    selected = [get_record('budget', key) for key in dict.fromkeys(ids)]
+    names = {r.id: r.data['name'] for r in list_records('category')}
+    items = [dict(name=names.get(category, 'Uncategorized'),
+                  **category_projection(category, selected, as_of, target))
+             for category in sorted({r.data['category_id'] for r in selected})]
+    return jsonify(as_of=as_of.isoformat(), date=target.isoformat(), items=items,
+                   incomplete=any(r['incomplete'] for r in items))
+
+
+@bp.get('/budgets/<budget_id>/projection')
+@login_required
+def budget_projection(budget_id):
+    budget = get_record('budget', budget_id)
+    as_of = today()
+    target = date.fromisoformat(date_string(request.args.get('date'), 'date'))
+    if target <= as_of:
+        raise ApiError('Projection date must be in the future')
+    selected = [r for r in list_records('budget') if r.data['category_id'] == budget.data['category_id']]
+    return jsonify(category_projection(budget.data['category_id'], selected, as_of, target))
 
 
 def forecast(horizon='month', as_of=None):
