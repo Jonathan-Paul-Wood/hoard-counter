@@ -109,7 +109,7 @@ def csv_report():
         rows = [{**row, 'currency': 'USD'} for row in report['monthly_trend']]
     elif section == 'budgets':
         fields = ['month', 'category_id', 'name', 'budget', 'actual', 'remaining', 'currency', 'scope']
-        rows = [{**row, 'month': month['month'], 'currency': 'USD', 'scope': 'Cumulative allocation as of date; tracked categories'} for month in report['budgets'] for row in month['items']]
+        rows = [{**row, 'month': month['month'], 'currency': 'USD', 'scope': 'Cumulative allowance as of date; tracked categories'} for month in report['budgets'] for row in month['items']]
     elif section == 'balances':
         fields = ['id', 'name', 'type', 'account_class', 'currency', 'balance', 'balance_usd', 'missing_rate', 'as_of']
         rows = [{**row, 'as_of': report['end']} for row in report['accounts']]
@@ -200,7 +200,7 @@ def build_pdf(report):
         for row in month['items']:
             budget_rows.append([month['month'] + ' / ' + row['name']] + [dollars(row[k]) for k in ('budget', 'actual', 'remaining')])
     if len(budget_rows) > 1:
-        story.extend([Spacer(1, 12), p('Budget allocation snapshots', 'Heading2'), p('Allocations are cumulative through each month end or the report end date; only budgeted categories are tracked.', 'Normal'), Spacer(1, 5), table(budget_rows, [232, 100, 100, 100])])
+        story.extend([Spacer(1, 12), p('Budget allowance snapshots', 'Heading2'), p('Allowances are cumulative through each month end or the report end date; only budgeted categories are tracked.', 'Normal'), Spacer(1, 5), table(budget_rows, [232, 100, 100, 100])])
     story.extend([Spacer(1, 12), p('Transactions', 'Heading2')])
     if report['transactions']:
         rows = [['Date / type', 'Description / accounts', 'Category', 'USD']]

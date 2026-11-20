@@ -1,4 +1,4 @@
-"""Preserve existing monthly budgets as bounded allocation schedules."""
+"""Preserve existing monthly budgets as bounded allowance schedules."""
 import calendar
 from datetime import date
 

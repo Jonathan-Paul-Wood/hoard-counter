@@ -187,7 +187,7 @@ def specification():
     paths['/accounts/{id}/reconcile'] = {'parameters': [id_parameter], 'post': operation('Record balance reconciliation', ref('ReconciliationResult'), ref('ReconciliationInput'), 'post')}
     occurrences = operation('List expected subscription occurrences', obj({'items': {'type': 'array', 'items': ref('SubscriptionOccurrence')}}, ['items']))
     occurrences['parameters'] = [query('start', DAY), query('end', DAY)]
-    paths['/budgets/{id}/projection'] = {'parameters': [id_parameter], 'get': operation('Project category allocation', request_schema=None)}
+    paths['/budgets/{id}/projection'] = {'parameters': [id_parameter], 'get': operation('Project category allowance', request_schema=None)}
     paths['/budgets/{id}/projection']['get']['parameters'] = [{'name': 'date', 'in': 'query', 'required': True, 'schema': DAY}]
     paths['/subscriptions/{id}/occurrences'] = {'parameters': [id_parameter], 'get': occurrences}
     paths['/imports/commit'] = {'post': operation('Commit a validated import preview', ref('ImportResult'), obj({'token': ID}, ['token']), 'post')}

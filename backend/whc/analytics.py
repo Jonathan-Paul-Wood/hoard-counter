@@ -162,7 +162,7 @@ def dashboard():
     return jsonify(**balances, **summary['summary'], category_spending=summary['category_spending'], monthly_trend=summary['monthly_trend'], start=args['start'], end=args['end'])
 
 
-def allocation_summary(as_of):
+def allowance_summary(as_of):
     from .budgets import credited
     budgets = list_records('budget')
     rows = transaction_records({'end': as_of.isoformat()})
@@ -191,13 +191,13 @@ def allocation_summary(as_of):
     total_budget, total_actual = sum(credits.values(), ZERO), sum((actuals.get(key, ZERO) for key in credits), ZERO)
     return dict(as_of=as_of.isoformat(), items=sorted(items, key=lambda r: r['name']),
                 total_budget=text(total_budget), total_actual=text(total_actual),
-                total_allocation=text(total_budget - total_actual))
+                total_allowance=text(total_budget - total_actual))
 
 
 def budget_summary(month, through=None):
     start = date.fromisoformat(date_string(month + '-01', 'month'))
     end = start.replace(day=calendar.monthrange(start.year, start.month)[1])
-    return dict(month=month, **allocation_summary(min(end, through) if through else end))
+    return dict(month=month, **allowance_summary(min(end, through) if through else end))
 
 
 @bp.get('/budget-summary')
@@ -206,12 +206,12 @@ def budgets_summary():
     if request.args.get('month'):
         return jsonify(budget_summary(request.args['month']))
     as_of = date.fromisoformat(date_string(request.args.get('as_of', today().isoformat()), 'as_of'))
-    return jsonify(allocation_summary(as_of))
+    return jsonify(allowance_summary(as_of))
 
 
 def category_projection(category, selected, as_of, target):
     from .budgets import credited
-    current = next(r for r in allocation_summary(as_of)['items'] if r['category_id'] == category)
+    current = next(r for r in allowance_summary(as_of)['items'] if r['category_id'] == category)
     credits = sum((credited(r.data, target) - credited(r.data, as_of)
                    for r in selected if r.data['category_id'] == category), ZERO)
     rows = transaction_records({'end': target.isoformat()})
@@ -240,9 +240,9 @@ def category_projection(category, selected, as_of, target):
                         amount=text(amount)) for dt in dates)
     subscriptions = sum((dec(r['amount']) for r in due), ZERO)
     return dict(category_id=category, as_of=as_of.isoformat(), date=target.isoformat(),
-                   current_allocation=current['remaining'], future_credits=text(credits),
+                   current_allowance=current['remaining'], future_credits=text(credits),
                    recorded_expenses=text(recorded), subscription_expenses=text(subscriptions),
-                   projected_allocation=text(dec(current['remaining']) + credits - recorded - subscriptions),
+                   projected_allowance=text(dec(current['remaining']) + credits - recorded - subscriptions),
                    occurrences=sorted(due, key=lambda r: (r['date'], r['name'])),
                    warnings=warnings, incomplete=bool(warnings))
 

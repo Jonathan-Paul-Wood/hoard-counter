@@ -285,7 +285,7 @@ export function Budgets() {
   const fields = useFields("budgets");
   const summary = useLoad<any>(
     `/budget-summary?as_of=${asOf}`,
-    { items: [], total_budget: "0", total_actual: "0", total_allocation: "0" },
+    { items: [], total_budget: "0", total_actual: "0", total_allowance: "0" },
     version,
   );
   const [budgets, setBudgets] = useState<{
@@ -332,12 +332,12 @@ export function Budgets() {
   return (
     <>
       <PageHead
-        title="Budgets and allocations"
+        title="Budgets and allowances"
         subtitle="Recurring credits minus category expenses. Balances carry forward after a budget ends."
         action={
           <>
             <input
-              aria-label="Allocation date"
+              aria-label="Allowance date"
               type="date"
               required
               value={asOf}
@@ -369,14 +369,14 @@ export function Budgets() {
           value={money(summary.data.total_actual)}
         />
         <Stat
-          label="Allocation"
-          value={money(summary.data.total_allocation)}
+          label="Allowance"
+          value={money(summary.data.total_allowance)}
           hint={`As of ${prettyDate(asOf)}`}
         />
       </div>
       <Panel
-        title="Allocations"
-        subtitle="Bars compare spending so far in the selected month with that month's full expected budget credits. Allocation balances carry forward. Refunds reduce expenses."
+        title="Allowances"
+        subtitle="Bars compare spending so far in the selected month with that month's full expected budget credits. Allowance balances carry forward. Refunds reduce expenses."
       >
         <ErrorBox error={summary.error} />
         {summary.loading ? (
@@ -405,7 +405,7 @@ export function Budgets() {
           </div>
         ) : (
           <Empty
-            title="No allocations yet"
+            title="No allowances yet"
             message="Create a budget to start tracking a category."
           />
         )}
@@ -638,7 +638,7 @@ function BudgetProjection({
     <Modal
       wide
       title="Budget projection"
-      subtitle="Estimate future allocations using selected budget credits and scheduled subscriptions. Projections are not saved."
+      subtitle="Estimate future allowances using selected budget credits and scheduled subscriptions. Projections are not saved."
       onClose={onClose}
     >
       <form className="budget-projection-form" onSubmit={calculate}>
@@ -682,7 +682,7 @@ function BudgetProjection({
           ))}
         </fieldset>
         <p className="muted">
-          Existing allocations are carried forward. Unchecked schedules add no
+          Existing allowances are carried forward. Unchecked schedules add no
           future credits. Future recorded expenses are included; linked
           subscription payments are counted once. Subscription estimates use
           current exchange rates.
@@ -699,7 +699,7 @@ function BudgetProjection({
       </form>
       {result && (
         <div className="budget-projection-results" aria-live="polite">
-          <h3>Estimated allocations on {prettyDate(result.date)}</h3>
+          <h3>Estimated allowances on {prettyDate(result.date)}</h3>
           {result.items.map((item: any) => (
             <div className="budget-row" key={item.category_id}>
               <div className="budget-main">
@@ -707,15 +707,15 @@ function BudgetProjection({
                   <strong>{item.name}</strong>
                   <span
                     className={
-                      Number(item.projected_allocation) < 0 ? "negative" : ""
+                      Number(item.projected_allowance) < 0 ? "negative" : ""
                     }
                   >
-                    {money(item.projected_allocation)}
+                    {money(item.projected_allowance)}
                   </span>
                 </div>
                 <div className="budget-caption">
                   <span>
-                    Current {money(item.current_allocation)} + credits{" "}
+                    Current {money(item.current_allowance)} + credits{" "}
                     {money(item.future_credits)}
                   </span>
                   <span>

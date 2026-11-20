@@ -50,7 +50,7 @@ def test_monthly_progress_uses_full_month_credits_and_month_to_date_expenses(hou
     assert Decimal(item['monthly_actual']) == 25
     assert Decimal(item['budget']) == 205
     assert Decimal(item['actual']) == 65
-    # Ended budgets retain allocations, but no longer contribute monthly credits.
+    # Ended budgets retain allowances, but no longer contribute monthly credits.
     item = client.get('/api/v1/budget-summary?as_of=2026-10-10').json['items'][0]
     assert Decimal(item['monthly_budget']) == 0
     assert Decimal(item['monthly_actual']) == 0
@@ -69,24 +69,24 @@ def test_monthly_progress_counts_anchored_occurrences_across_schedule_changes(ho
     assert Decimal(march['monthly_budget']) == 20
 
 
-def test_carryover_refunds_negative_allocations_and_no_postings(household):
+def test_carryover_refunds_negative_allowances_and_no_postings(household):
     _, client, headers, create, account, category = household
     before = client.get('/api/v1/accounts/' + account['id']).json['balance']
     budget = create('budgets', dict(category_id=category['id'], amount='100', period='month', frequency=1, start_date='2026-01-31', end_date='2026-03-31'))
     assert client.get('/api/v1/accounts/' + account['id']).json['balance'] == before
     create('transactions', expense(account, category, '250', '2026-02-01'))
     summary = client.get('/api/v1/budget-summary?as_of=2026-02-28').json
-    assert Decimal(summary['total_allocation']) == -50
+    assert Decimal(summary['total_allowance']) == -50
     create('transactions', dict(source_account_id=system_id('expense'), destination_account_id=account['id'], type='Expense', date='2026-03-01', amount='25', description='Refund', category_id=category['id'], is_refund=True))
     summary = client.get('/api/v1/budget-summary?as_of=2027-01-01').json
     assert Decimal(summary['total_budget']) == 300
     assert Decimal(summary['total_actual']) == 225
-    assert Decimal(summary['total_allocation']) == 75
+    assert Decimal(summary['total_allowance']) == 75
     changed = client.patch('/api/v1/budgets/' + budget['id'], headers=headers, json=dict(revision=budget['revision'], end_date=None))
     assert changed.status_code == 200
     assert Decimal(client.get('/api/v1/budget-summary?as_of=2026-04-30').json['total_budget']) == 400
     assert client.delete('/api/v1/budgets/' + budget['id'], headers=headers, json=dict(revision=changed.json['revision'])).status_code == 200
-    assert Decimal(client.get('/api/v1/budget-summary?as_of=2026-04-30').json['total_allocation']) == 0
+    assert Decimal(client.get('/api/v1/budget-summary?as_of=2026-04-30').json['total_allowance']) == 0
 
 
 def test_projection_combines_schedules_and_deduplicates_paid_subscriptions(household, monkeypatch):
@@ -101,11 +101,11 @@ def test_projection_combines_schedules_and_deduplicates_paid_subscriptions(house
     result = client.get(f"/api/v1/budgets/{budget['id']}/projection?date=2026-03-31")
     assert result.status_code == 200, result.json
     data = result.json
-    assert Decimal(data['current_allocation']) == 80
+    assert Decimal(data['current_allowance']) == 80
     assert Decimal(data['future_credits']) == 25
     assert Decimal(data['recorded_expenses']) == 17
     assert Decimal(data['subscription_expenses']) == 20
-    assert Decimal(data['projected_allocation']) == 68
+    assert Decimal(data['projected_allowance']) == 68
     assert [r['date'] for r in data['occurrences']] == ['2026-01-20', '2026-03-20']
     # Voiding a payment makes the expected occurrence outstanding again.
     client.delete('/api/v1/transactions/' + payment['id'], headers=headers, json=dict(revision=payment['revision']))
@@ -147,10 +147,10 @@ def test_projection_fx_warnings_and_subscription_scope(household, monkeypatch):
     data = client.get(endpoint).json
     assert not data['incomplete'] and not data['warnings']
     assert Decimal(data['subscription_expenses']) == Decimal('12.50')
-    assert Decimal(data['projected_allocation']) == Decimal('187.50')
+    assert Decimal(data['projected_allowance']) == Decimal('187.50')
 
 
-def test_report_allocations_are_cumulative_and_stop_at_report_end(household):
+def test_report_allowances_are_cumulative_and_stop_at_report_end(household):
     _, client, _, create, account, category = household
     create('budgets', dict(category_id=category['id'], amount='10', period='day', frequency=1, start_date='2026-01-01'))
     create('transactions', expense(account, category, '5', '2025-12-31'))
@@ -162,7 +162,7 @@ def test_report_allocations_are_cumulative_and_stop_at_report_end(household):
     assert snapshot['as_of'] == '2026-01-04'
     assert Decimal(snapshot['total_budget']) == 40
     assert Decimal(snapshot['total_actual']) == 5
-    assert Decimal(snapshot['total_allocation']) == 35
+    assert Decimal(snapshot['total_allowance']) == 35
 
 
 def test_upgrade_resets_budget_data(tmp_path):
@@ -196,15 +196,15 @@ def test_projection_selection_and_untracked_categories(household, monkeypatch):
     create('transactions', expense(account, category, '20', '2026-01-10'))
     summary = client.get('/api/v1/budget-summary?as_of=2026-01-15').json
     assert len(summary['items']) == 1
-    assert Decimal(summary['total_allocation']) == 80
+    assert Decimal(summary['total_allowance']) == 80
     def project(ids):
         return client.post('/api/v1/budget-projections', headers=headers, json=dict(date='2026-02-28', budget_ids=ids))
     before = client.get('/api/v1/budgets').json
     assert project([]).json['items'] == []
-    assert Decimal(project([first['id']]).json['items'][0]['projected_allocation']) == 80
+    assert Decimal(project([first['id']]).json['items'][0]['projected_allowance']) == 80
     result = project([first['id'], second['id'], second['id']]).json
     assert len(result['items']) == 1
-    assert Decimal(result['items'][0]['projected_allocation']) == 180
+    assert Decimal(result['items'][0]['projected_allowance']) == 180
     assert client.get('/api/v1/budgets').json == before
     assert client.post('/api/v1/budget-projections', headers=headers, json=dict(date='2026-01-15', budget_ids=[])).status_code == 400
     assert project(['missing']).status_code == 404
@@ -219,4 +219,4 @@ def test_subscription_payment_after_target_does_not_hide_planned_expense(househo
     result = client.post('/api/v1/budget-projections', headers=headers, json=dict(date='2026-01-31', budget_ids=[budget['id']])).json['items'][0]
     assert Decimal(result['subscription_expenses']) == 10
     assert Decimal(result['recorded_expenses']) == 0
-    assert Decimal(result['projected_allocation']) == 90
+    assert Decimal(result['projected_allowance']) == 90

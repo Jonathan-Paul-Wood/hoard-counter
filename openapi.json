@@ -12398,7 +12398,7 @@
         }
       ],
       "get": {
-        "summary": "Project category allocation",
+        "summary": "Project category allowance",
         "responses": {
           "200": {
             "description": "Success",

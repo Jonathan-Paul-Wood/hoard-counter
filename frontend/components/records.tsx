@@ -459,7 +459,7 @@ export function DeleteDialog({
         {resource === "transactions"
           ? "This removes the transaction from active balances and reports. Its original values remain in the audit history."
           : resource === "budgets"
-            ? "Deleting this budget removes all of its credits and recalculates the category allocation. To preserve past credits, edit the budget's end date instead."
+            ? "Deleting this budget removes all of its credits and recalculates the category allowance. To preserve past credits, edit the budget's end date instead."
             : resource === "accounts"
               ? `Remove “${record.name}” from active accounts? Only unused accounts with a zero opening balance can be removed. Audit history is retained; linked records must be unlinked first.`
               : `Remove “${record.name || record.description || record.date || "this record"}”? Records in use may need to be unlinked first.`}
