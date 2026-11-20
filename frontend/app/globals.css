@@ -743,6 +743,51 @@ input[type="file"]::file-selector-button {
 .bar-track > span.over {
   background: #b17b59;
 }
+.performance-calculation {
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.performance-calculation h3,
+.performance-calculation h4 {
+  margin: 16px 0 8px;
+}
+.performance-period {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+  margin: 12px 0;
+}
+.performance-period summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.performance-inputs > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 6px 0;
+}
+.performance-inputs dd {
+  margin: 0;
+  text-align: right;
+}
+.performance-calculation caption {
+  text-align: left;
+  padding: 8px 0;
+  font-weight: 600;
+}
+.performance-steps {
+  padding-left: 22px;
+}
+.performance-steps li {
+  margin: 12px 0;
+}
+.performance-formula,
+.performance-steps li div {
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
 .holdings-summary {
   padding: 4px 22px 18px;
 }

@@ -280,21 +280,32 @@ def performance(account_id):
         if days <= 0:
             continue
         flows = weighted = ZERO
+        cash_flows = []
+
+        def add_flow(row, flow, kind):
+            nonlocal flows, weighted
+            remaining_days = (end - date.fromisoformat(row['date'])).days
+            weight = D(remaining_days) / D(days)
+            weighted_amount = flow * D(remaining_days) / D(days)
+            flows += flow
+            weighted += weighted_amount
+            cash_flows.append(dict(id=row['id'], date=row['date'], description=row.get('description') or kind,
+                                   kind=kind, amount=text(flow), remaining_days=remaining_days,
+                                   weight=text(weight), weighted_amount=text(weighted_amount)))
+
         for row in rows:
             when = date.fromisoformat(row['date'])
             if not (begin < when <= end) or row.get('type') == 'Return' or row.get('investment_fee'):
                 continue
             incoming = row.get('destination_account_id') == account_id
             flow = (dec(row.get('destination_amount', row['amount'])) * dec(row.get('destination_fx_rate', row.get('fx_rate', '1')))) if incoming else -dec(row.get('usd_amount'))
-            flows += flow
-            weighted += flow * D((end - when).days) / D(days)
+            add_flow(row, flow, 'Contribution' if incoming else 'Withdrawal')
         # A balance correction or newly entered opening principal is not a gain.
         for row in adjustments:
             when = date.fromisoformat(row['date'])
             if begin < when <= end:
                 flow = dec(row['usd_amount'])
-                flows += flow
-                weighted += flow * D((end - when).days) / D(days)
+                add_flow(row, flow, 'Opening principal' if row['system'] == 'opening' else 'Balance correction')
         initial, final = dec(left['usd_amount']), dec(right['usd_amount'])
         denominator = initial + weighted
         if denominator <= 0:
@@ -303,7 +314,11 @@ def performance(account_id):
         if rate < -1:
             return dict(**base, reason='Performance is unavailable when an interval loss exceeds its weighted capital.')
         cumulative *= 1 + rate
-        intervals.append(dict(start=left['date'], end=right['date'], return_rate=text(rate), external_flows=text(flows)))
+        intervals.append(dict(start=left['date'], end=right['date'], days=days,
+                              starting_value=text(initial), ending_value=text(final),
+                              return_rate=text(rate), external_flows=text(flows), weighted_flows=text(weighted),
+                              gain=text(final - initial - flows), weighted_capital=text(denominator),
+                              cash_flows=sorted(cash_flows, key=lambda row: (row['date'], row['id']))))
     days = (date.fromisoformat(values[-1]['date']) - date.fromisoformat(values[0]['date'])).days
     annual = (cumulative ** (D('365.25') / D(days)) - 1) if days >= 365 else None
     return dict(account_id=account_id, name=account.data['name'], available=bool(intervals), reason=None, start=values[0]['date'], end=values[-1]['date'], days=days, cumulative_return=text(cumulative - 1), annualized_return=text(annual) if annual is not None else None, intervals=intervals, method='Modified Dietz, chained; USD; estimated')

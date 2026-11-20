@@ -1167,6 +1167,7 @@ function Performance({ accountId }: { accountId: string }) {
             Estimated using Modified Dietz cash-flow weighting. Historical
             projection mode requires at least one year of valid coverage.
           </p>
+          <PerformanceCalculation data={data} />
         </>
       ) : (
         <Empty
@@ -1178,6 +1179,164 @@ function Performance({ accountId }: { accountId: string }) {
         />
       )}
     </Panel>
+  );
+}
+
+function PerformanceCalculation({ data }: { data: any }) {
+  const percent = (value: string) => `${(Number(value) * 100).toFixed(2)}%`;
+  const factor = (value: string) => (1 + Number(value)).toFixed(6);
+  return (
+    <div className="performance-calculation panel-body">
+      <h3>How your returns were calculated</h3>
+      <p>
+        All amounts are in USD, using the exchange rates saved with each
+        valuation and transaction. We use consecutive valuations within the
+        latest three years, ending at the most recent valuation on or before
+        today.
+      </p>
+      <p>
+        Contributions are positive and withdrawals are negative. Cash flows
+        after the opening valuation through the closing valuation are included.
+        Return transactions and investment fees stay in performance; opening
+        principal and balance corrections count as external cash flows.
+      </p>
+      <h4>1. Calculate each valuation period</h4>
+      <p>
+        Each cash flow is weighted by how long it was invested: weight = days
+        remaining until the closing valuation ÷ days in the period. A cash flow
+        on the closing date has a weight of zero.
+      </p>
+      {data.intervals.map((interval: any, index: number) => (
+        <details
+          className="performance-period"
+          key={`${interval.start}-${interval.end}`}
+          open={index === 0}
+        >
+          <summary>
+            {prettyDate(interval.start)} – {prettyDate(interval.end)} ·{" "}
+            {interval.days} days · {percent(interval.return_rate)} return
+          </summary>
+          <dl className="performance-inputs">
+            <div>
+              <dt>Starting valuation</dt>
+              <dd>{money(interval.starting_value)}</dd>
+            </div>
+            <div>
+              <dt>Ending valuation</dt>
+              <dd>{money(interval.ending_value)}</dd>
+            </div>
+            <div>
+              <dt>Net external cash flows</dt>
+              <dd>{money(interval.external_flows)}</dd>
+            </div>
+            <div>
+              <dt>Weighted cash flows</dt>
+              <dd>{money(interval.weighted_flows)}</dd>
+            </div>
+          </dl>
+          {interval.cash_flows.length ? (
+            <div className="table-wrap">
+              <table>
+                <caption>Cash-flow weighting for this period</caption>
+                <thead>
+                  <tr>
+                    <th>Date / cash flow</th>
+                    <th className="number">Amount (USD)</th>
+                    <th className="number">
+                      Weight (days remaining / period days)
+                    </th>
+                    <th className="number">Amount × weight (USD)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {interval.cash_flows.map((flow: any) => (
+                    <tr key={flow.id}>
+                      <td>
+                        {prettyDate(flow.date)} · {flow.kind}
+                        <br />
+                        <span className="muted">{flow.description}</span>
+                      </td>
+                      <td className="number">{money(flow.amount)}</td>
+                      <td className="number">
+                        {flow.remaining_days} / {interval.days} ={" "}
+                        {Number(flow.weight).toFixed(6)}
+                      </td>
+                      <td className="number">{money(flow.weighted_amount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p>
+              No external cash flows in this period; net and weighted cash flows
+              are both $0.00.
+            </p>
+          )}
+          <p>
+            Net cash flows = sum of signed cash-flow amounts. Weighted cash
+            flows = sum of each amount × its weight.
+          </p>
+          <ol className="performance-steps">
+            <li>
+              Investment gain = ending value − starting value − net cash flows
+              <div>
+                {money(interval.ending_value)} − (
+                {money(interval.starting_value)}) − (
+                {money(interval.external_flows)}) ={" "}
+                <strong>{money(interval.gain)}</strong>
+              </div>
+            </li>
+            <li>
+              Weighted capital = starting value + weighted cash flows
+              <div>
+                {money(interval.starting_value)} + (
+                {money(interval.weighted_flows)}) ={" "}
+                <strong>{money(interval.weighted_capital)}</strong>
+              </div>
+            </li>
+            <li>
+              Period return = investment gain ÷ weighted capital
+              <div>
+                {money(interval.gain)} ÷ {money(interval.weighted_capital)} ={" "}
+                <strong>{percent(interval.return_rate)}</strong>
+              </div>
+            </li>
+          </ol>
+        </details>
+      ))}
+      <h4>2. Combine the period returns</h4>
+      <p>
+        Cumulative return = (1 + first period return) × (1 + next period return)
+        × … − 1.
+      </p>
+      <p className="performance-formula">
+        {data.intervals
+          .map((interval: any) => factor(interval.return_rate))
+          .join(" × ")}{" "}
+        − 1 = <strong>{percent(data.cumulative_return)}</strong>
+      </p>
+      <h4>3. Convert to an annual rate</h4>
+      <p>
+        Annualized return = (1 + cumulative return) raised to (365.25 ÷ coverage
+        days) − 1.
+      </p>
+      {data.annualized_return == null ? (
+        <p>
+          There are {data.days} days of coverage. At least 365 days are needed
+          to show an annualized return.
+        </p>
+      ) : (
+        <p className="performance-formula">
+          {factor(data.cumulative_return)} ^ (365.25 ÷ {data.days}) − 1 ={" "}
+          <strong>{percent(data.annualized_return)}</strong>
+        </p>
+      )}
+      <p className="muted">
+        Displayed amounts and rates are rounded. Calculations use the full
+        stored precision.
+      </p>
+    </div>
   );
 }
 
