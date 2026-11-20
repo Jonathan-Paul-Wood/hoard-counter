@@ -628,6 +628,18 @@
                     "type": "string",
                     "maxLength": 10000
                   },
+                  "closed_on": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "date"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Closing date, inclusive. Null means open. Closing requires zero net balance and no later activity; historical reports retain this account."
+                  },
                   "opening_currency": {
                     "type": "string",
                     "description": "Currency of the opening amount; preserved when existing currencies are kept."
@@ -12812,6 +12824,18 @@
             "type": "string",
             "maxLength": 10000
           },
+          "closed_on": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Closing date, inclusive. Null means open. Closing requires zero net balance and no later activity; historical reports retain this account."
+          },
           "opening_currency": {
             "type": "string",
             "description": "Currency of the opening amount; preserved when existing currencies are kept."
@@ -14466,6 +14490,18 @@
           "description": {
             "type": "string",
             "maxLength": 10000
+          },
+          "closed_on": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Closing date, inclusive. Null means open. Closing requires zero net balance and no later activity; historical reports retain this account."
           },
           "opening_currency": {
             "type": "string",

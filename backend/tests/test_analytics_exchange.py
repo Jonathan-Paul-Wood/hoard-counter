@@ -92,7 +92,7 @@ def test_forecast_excludes_recurring_and_transfers(household, monkeypatch):
     for month in ('07', '08', '09'):
         create('transactions', expense(account, category, '30', f'2026-{month}-01'))
         create('transactions', expense(account, category, '10', f'2026-{month}-15', subscription_id=sub['id'], subscription_date=f'2026-{month}-15'))
-    other = create('accounts', {'name': 'Savings', 'type': 'Savings', 'currency': 'USD'})
+    other = create('accounts', {'name': 'Savings', 'type': 'Savings', 'currency': 'USD', 'opening_date': '2024-01-01'})
     create('transactions', {'type': 'Transfer', 'date': '2026-09-03', 'source_account_id': account['id'], 'destination_account_id': other['id'], 'amount': '500', 'description': 'Savings transfer'})
     forecast = client.get('/api/v1/forecast?horizon=month').json
     assert forecast['history_months'] == ['2026-07', '2026-08', '2026-09']
@@ -212,6 +212,35 @@ def test_account_number_search_and_csv_roundtrip(household):
     preview = client.post('/api/v1/imports/preview', headers=headers, data={'kind': 'accounts', 'file': (io.BytesIO(exported.data), 'accounts.csv')}).json
     assert not preview['errors'] and not preview['conflicts'], preview
     assert preview['summary']['skip'] == len(rows)
+
+
+def test_closed_account_survives_archive_roundtrip(household, tmp_path):
+    _, client, headers, create, account, category = household
+    path = '/api/v1/accounts/' + account['id']
+    failed = client.patch(path, headers=headers, json={'revision': account['revision'], 'closed_on': '2026-07-15'})
+    assert failed.status_code == 409
+    assert not client.get(path).json.get('closed_on')
+    purchase = create('transactions', expense(account, category, '1000'))
+    closed = client.patch(path, headers=headers, json={'revision': account['revision'], 'closed_on': '2026-07-15'})
+    assert closed.status_code == 200, closed.json
+    blocked = client.post('/api/v1/transactions', headers=headers, json=expense(account, category, '1', '2026-07-16'))
+    assert blocked.status_code == 409
+    assert client.get(path).json['balance'] == '0'
+    archive = client.get('/api/v1/exports?format=archive')
+    second_dir = tmp_path / 'closed-restored'
+    second = create_app({'TESTING': True, 'COOKIE_SECURE': False, 'DATA_DIR': str(second_dir), 'UPLOAD_DIR': str(second_dir / 'uploads'), 'BACKUP_DIR': str(second_dir / 'backups'), 'DATABASE_URL': 'sqlite:///' + str(second_dir / 'test.db')})
+    other = second.test_client()
+    other.post('/api/v1/auth/setup', json={'username': 'owner2', 'password': 'another correct long password'})
+    other_headers = {'X-CSRF-Token': other.get('/api/v1/auth/session').json['csrf_token']}
+    preview = other.post('/api/v1/imports/preview', headers=other_headers, data={'kind': 'archive', 'file': (io.BytesIO(archive.data), 'archive.zip')})
+    assert preview.status_code == 200 and not preview.json['errors'], preview.json
+    result = other.post('/api/v1/imports/commit', headers=other_headers, json={'token': preview.json['token']})
+    assert result.status_code == 200, result.json
+    restored = other.get(path).json
+    assert restored['closed_on'] == '2026-07-15' and restored['balance'] == '0' and not restored['deleted']
+    assert other.get('/api/v1/transactions/' + purchase['id']).status_code == 200
+    report = other.get('/api/v1/reports/data?start=2026-07-01&end=2026-07-31').json
+    assert Decimal(report['summary']['expenses']) == 1000
 
 
 def test_deleted_unused_account_survives_archive_roundtrip(household, tmp_path):

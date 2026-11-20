@@ -44,6 +44,19 @@ button:disabled {
   cursor: not-allowed;
   opacity: 0.5;
 }
+input:disabled,
+select:disabled,
+textarea:disabled {
+  cursor: not-allowed;
+}
+.warning.div {
+  text-align: center;
+  margin: 0.25em 0;
+  background: #a97050;
+  color: white;
+  border-radius: 5px;
+  padding: 0.5em;
+}
 a {
   color: var(--green);
   text-decoration: none;
