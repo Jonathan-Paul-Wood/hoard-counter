@@ -162,44 +162,84 @@ def dashboard():
     return jsonify(**balances, **summary['summary'], category_spending=summary['category_spending'], monthly_trend=summary['monthly_trend'], start=args['start'], end=args['end'])
 
 
-def budget_summary(month):
-    start = date.fromisoformat(month + '-01')
-    end = add_months(start, 1) - timedelta(days=1)
-    actuals = {r['category_id']: dec(r['amount']) for r in summarize(transaction_records({'start': start.isoformat(), 'end': end.isoformat()}))['category_spending']}
-    budgets = {r.data.get('category_id'): dec(r.data['amount']) for r in list_records('budget') if r.data.get('month') == month}
+def allocation_summary(as_of):
+    from .budgets import credited
+    budgets = list_records('budget')
+    actuals = {r['category_id']: dec(r['amount']) for r in summarize(
+        transaction_records({'end': as_of.isoformat()}))['category_spending']}
+    credits = {}
+    for record in budgets:
+        key = record.data['category_id']
+        credits[key] = credits.get(key, ZERO) + credited(record.data, as_of)
     names = {r.id: r.data['name'] for r in list_records('category')}
-    items = []
-    for key in set(actuals) | set(budgets):
-        budget, actual = budgets.get(key, ZERO), actuals.get(key, ZERO)
-        items.append(dict(category_id=key, name=names.get(key, 'Uncategorized'), budget=text(budget), actual=text(actual), remaining=text(budget - actual)))
-    return dict(month=month, items=sorted(items, key=lambda r: r['name']), total_budget=text(sum(budgets.values(), ZERO)), total_actual=text(sum(actuals.values(), ZERO)))
+    items = [dict(category_id=key, name=names.get(key, 'Uncategorized'),
+                  budget=text(credits.get(key, ZERO)), actual=text(actuals.get(key, ZERO)),
+                  remaining=text(credits.get(key, ZERO) - actuals.get(key, ZERO)))
+             for key in set(credits) | set(actuals)]
+    total_budget, total_actual = sum(credits.values(), ZERO), sum(actuals.values(), ZERO)
+    return dict(as_of=as_of.isoformat(), items=sorted(items, key=lambda r: r['name']),
+                total_budget=text(total_budget), total_actual=text(total_actual),
+                total_allocation=text(total_budget - total_actual))
+
+
+def budget_summary(month, through=None):
+    start = date.fromisoformat(date_string(month + '-01', 'month'))
+    end = start.replace(day=calendar.monthrange(start.year, start.month)[1])
+    return dict(month=month, **allocation_summary(min(end, through) if through else end))
 
 
 @bp.get('/budget-summary')
 @login_required
 def budgets_summary():
-    return jsonify(budget_summary(request.args.get('month', today().strftime('%Y-%m'))))
+    if request.args.get('month'):
+        return jsonify(budget_summary(request.args['month']))
+    as_of = date.fromisoformat(date_string(request.args.get('as_of', today().isoformat()), 'as_of'))
+    return jsonify(allocation_summary(as_of))
 
 
-@bp.post('/budgets/copy')
+@bp.get('/budgets/<budget_id>/projection')
 @login_required
-def copy_budgets():
-    body = request.get_json()
-    if not isinstance(body, dict):
-        raise ValueError('Request body must be an object.')
-    source, target = body['source_month'], body['target_month']
-    date.fromisoformat(source + '-01')
-    date.fromisoformat(target + '-01')
-    if source == target:
-        return jsonify(error='Choose a different target month.'), 400
-    present = {r.data.get('category_id') for r in list_records('budget') if r.data.get('month') == target}
-    count = 0
-    for row in list_records('budget'):
-        if row.data.get('month') == source and row.data.get('category_id') not in present:
-            save_record('budget', {**row.data, 'month': target}, g.user)
-            count += 1
-    db.session.commit()
-    return jsonify(copied=count, **budget_summary(target))
+def budget_projection(budget_id):
+    from .budgets import credited
+    budget = get_record('budget', budget_id)
+    as_of = today()
+    target = date.fromisoformat(date_string(request.args.get('date'), 'date'))
+    if target < as_of:
+        raise ApiError('Projection date must be today or later')
+    category = budget.data['category_id']
+    current = next(r for r in allocation_summary(as_of)['items'] if r['category_id'] == category)
+    credits = sum((credited(r.data, target) - credited(r.data, as_of)
+                   for r in list_records('budget') if r.data['category_id'] == category), ZERO)
+    rows = transaction_records({'end': target.isoformat()})
+    recorded = sum((expense_amount(r) for r in rows if r.get('category_id') == category
+                    and r['date'] > as_of.isoformat()), ZERO)
+    # A linked occurrence is represented by its actual transaction, even when its
+    # payment date or category differs from the subscription's expected values.
+    fulfilled = {(r.data.get('subscription_id'), r.data.get('subscription_date'))
+                 for r in list_records('transaction') if r.data.get('subscription_id')}
+    due, warnings = [], []
+    for record in list_records('subscription'):
+        sub = record.data
+        if sub.get('category_id') != category or sub.get('type', 'Expense') != 'Expense':
+            continue
+        dates = [dt for dt in occurrences(sub, as_of, target)
+                 if dt > as_of and (record.id, dt.isoformat()) not in fulfilled]
+        if not dates:
+            continue
+        try:
+            amount = dec(sub['amount']) * rate_for(sub.get('currency', 'USD'), as_of.isoformat())
+        except (ValueError, LookupError, ApiError) as exc:
+            warnings.append(f"{sub.get('name', record.id)}: {exc}")
+            continue
+        due.extend(dict(subscription_id=record.id, name=sub['name'], date=dt.isoformat(),
+                        amount=text(amount)) for dt in dates)
+    subscriptions = sum((dec(r['amount']) for r in due), ZERO)
+    return jsonify(category_id=category, as_of=as_of.isoformat(), date=target.isoformat(),
+                   current_allocation=current['remaining'], future_credits=text(credits),
+                   recorded_expenses=text(recorded), subscription_expenses=text(subscriptions),
+                   projected_allocation=text(dec(current['remaining']) + credits - recorded - subscriptions),
+                   occurrences=sorted(due, key=lambda r: (r['date'], r['name'])),
+                   warnings=warnings, incomplete=bool(warnings))
 
 
 def forecast(horizon='month', as_of=None):

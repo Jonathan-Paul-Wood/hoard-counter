@@ -263,14 +263,24 @@ def _validate(kind, data, existing, preserve_snapshots=False, historical=False):
         if not historical and any(r.id != (existing.id if existing else None) and r.data["currency"] == data["currency"] and r.data["date"] == data["date"] for r in list_records("rate")):
             raise ApiError("A rate already exists for this currency and date", 409)
     elif kind == "budget":
-        month = data.get("month", "")
-        date_string(month + "-01", "month")
+        # Accept old archives and clients as a single, bounded monthly credit.
+        if "month" in data:
+            import calendar
+            start = date.fromisoformat(date_string(data.pop("month") + "-01", "month"))
+            data.setdefault("start_date", start.isoformat())
+            data.setdefault("end_date", start.replace(day=calendar.monthrange(start.year, start.month)[1]).isoformat())
+        data["start_date"] = date_string(data.get("start_date"), "start_date")
+        data["end_date"] = date_string(data["end_date"], "end_date") if data.get("end_date") else None
+        if data["end_date"] and data["end_date"] < data["start_date"]:
+            raise ApiError("Budget end precedes its start")
+        data["frequency"] = data.get("frequency", "monthly")
+        if data["frequency"] not in ("daily", "weekly", "monthly", "quarterly", "annually"):
+            raise ApiError("Unsupported budget frequency")
+        data.pop("interval", None)
         _reference(data, "category_id", "category", True, historical)
         data["amount"] = amount(data.get("amount"), "USD")
         if decimal(data["amount"]) < 0:
             raise ApiError("Budget amount cannot be negative")
-        if not historical and any(r.id != (existing.id if existing else None) and r.data.get("month") == month and r.data.get("category_id") == data["category_id"] for r in list_records("budget")):
-            raise ApiError("This category already has a budget for that month", 409)
     elif kind == "subscription":
         required_text(data, "name", 160)
         source = _reference(data, "source_account_id", "account", True, historical)
