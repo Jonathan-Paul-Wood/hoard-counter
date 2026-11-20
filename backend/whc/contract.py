@@ -21,7 +21,7 @@ META = {'id': ID, 'revision': {'type': 'integer', 'minimum': 1}, 'last_modified'
 SCHEMAS = {
     'EntityMeta': obj(META, ['id', 'revision', 'last_modified']),
     'Account': obj({**META, 'name': string(), 'type': string(), 'account_class': string(enum=['asset', 'liability', 'income', 'expense', 'equity']), 'currency': string(), 'opening_balance': MONEY, 'opening_date': DAY, 'opening_fx_rate': MONEY, 'balance': MONEY, 'balance_usd': {'anyOf': [MONEY, {'type': 'null'}]}, 'signed_balance': MONEY, 'signed_balance_usd': {'anyOf': [MONEY, {'type': 'null'}]}, 'as_of': DAY, 'valuation_date': {'anyOf': [DAY, {'type': 'null'}]}, 'missing_rate': {'type': 'boolean'}}, ['id', 'revision', 'last_modified', 'name', 'type', 'account_class', 'currency', 'balance']),
-    'Transaction': obj({**META, 'source_account_id': ID, 'destination_account_id': ID, 'date': DAY, 'amount': MONEY, 'destination_amount': MONEY, 'description': string(), 'type': string(enum=['Income', 'Expense', 'Transfer', 'Return']), 'currency': string(), 'usd_amount': MONEY, 'fx_rate': MONEY, 'destination_fx_rate': MONEY, 'category_id': {'anyOf': [ID, {'type': 'null'}]}, 'tag_ids': {'type': 'array', 'items': ID}, 'notes': string(), 'subscription_id': {'anyOf': [ID, {'type': 'null'}]}, 'subscription_date': {'anyOf': [DAY, {'type': 'null'}]}, 'is_refund': {'type': 'boolean'}, 'investment_fee': {'type': 'boolean'}}, ['id', 'revision', 'last_modified', 'source_account_id', 'destination_account_id', 'date', 'amount', 'description', 'type']),
+    'Transaction': obj({**META, 'source_account_id': ID, 'destination_account_id': ID, 'date': DAY, 'amount': MONEY, 'destination_amount': MONEY, 'description': string(), 'type': string(enum=['Income', 'Expense', 'Transfer']), 'currency': string(), 'usd_amount': MONEY, 'fx_rate': MONEY, 'destination_fx_rate': MONEY, 'category_id': {'anyOf': [ID, {'type': 'null'}]}, 'tag_ids': {'type': 'array', 'items': ID}, 'notes': string(), 'subscription_id': {'anyOf': [ID, {'type': 'null'}]}, 'subscription_date': {'anyOf': [DAY, {'type': 'null'}]}, 'is_refund': {'type': 'boolean'}, 'investment_fee': {'type': 'boolean'}}, ['id', 'revision', 'last_modified', 'source_account_id', 'destination_account_id', 'date', 'amount', 'description', 'type']),
     'Category': obj({**META, 'name': string()}, ['id', 'revision', 'last_modified', 'name']),
     'Tag': obj({**META, 'name': string()}, ['id', 'revision', 'last_modified', 'name']),
     'Subscription': obj({**META, 'name': string(), 'type': string(), 'source_account_id': ID, 'destination_account_id': ID, 'amount': MONEY, 'currency': string(), 'start_date': DAY, 'end_date': {'anyOf': [DAY, {'type': 'null'}]}, 'frequency': string(enum=['daily', 'weekly', 'monthly', 'yearly']), 'interval': {'type': 'integer', 'minimum': 1}, 'category_id': {'anyOf': [ID, {'type': 'null'}]}, 'amount_tolerance': MONEY, 'day_tolerance': {'type': 'integer'}, 'active': {'type': 'boolean'}}, ['id', 'revision', 'last_modified', 'name', 'source_account_id', 'destination_account_id', 'amount', 'start_date', 'frequency']),
@@ -74,15 +74,14 @@ SCHEMAS['Account']['properties']['description'] = string(maxLength=10000)
 SCHEMAS['Account']['properties']['closed_on'] = {'anyOf': [DAY, {'type': 'null'}], 'description': 'Closing date, inclusive. Null means open. Closing requires zero net balance and no later activity; historical reports retain this account.'}
 SCHEMAS['Account']['properties']['opening_currency'] = string(description='Currency of the opening amount; preserved when existing currencies are kept.')
 SCHEMAS['Transaction']['properties']['currency'] = string(description='Defaults to the source account currency on creation.')
-SCHEMAS['Transaction']['properties']['destination_currency'] = string(description='Defaults to the destination account currency; Returns use the transaction currency.')
+SCHEMAS['Transaction']['properties']['destination_currency'] = string(description='Defaults to the destination account currency.')
 SCHEMAS['Transaction']['properties']['destination_usd_amount'] = MONEY
+SCHEMAS['Subscription']['properties']['type'] = deepcopy(SCHEMAS['Transaction']['properties']['type'])
 SCHEMAS['Valuation']['properties']['currency'] = string()
 SCHEMAS['SystemJournal']['properties']['currency'] = string()
 for name in ('Transaction', 'SystemJournal', 'Valuation'):
     SCHEMAS[name]['properties']['posting_snapshots'] = {'type': 'object', 'additionalProperties': obj({'currency': string(), 'fx_rate': MONEY}, ['currency', 'fx_rate'])}
 SCHEMAS['Account']['properties']['opening_posting_snapshots'] = deepcopy(SCHEMAS['Transaction']['properties']['posting_snapshots'])
-for name in ('Transaction', 'Subscription'):
-    SCHEMAS[name]['properties']['return_account_type'] = string(description='Original investment account type retained for historical Returns.')
 SCHEMAS['Credentials']['properties']['password']['maxLength'] = 256
 SCHEMAS['User']['properties']['created_at'] = string(format='date-time')
 SCHEMAS['User']['required'].append('active')
@@ -116,7 +115,6 @@ def specification():
             writable['required'] = ['name', 'source_account_id', 'destination_account_id', 'amount', 'start_date']
         writable['properties'].pop('posting_snapshots', None)
         writable['properties'].pop('opening_posting_snapshots', None)
-        writable['properties'].pop('return_account_type', None)
         writable['properties'].pop('destination_usd_amount', None)
         schemas[name + 'Input'] = writable
         item_schema = ref('CurrencyDefinition' if name == 'Currency' else 'Journal' if name == 'Transaction' else name)
@@ -137,6 +135,11 @@ def specification():
             for method in ('patch', 'delete'):
                 paths['/' + plural + '/{id}'][method]['description'] = 'Administrator access is required. Built-in currency definitions are read-only.'
     paths['/transactions']['get']['parameters'].append({'name': 'include_system', 'in': 'query', 'schema': {'type': 'boolean', 'default': False}, 'description': 'Include opening, valuation, and reconciliation journals.'})
+    for resource, fields in [('transactions', ['description', 'date', 'category', 'account', 'amount']), ('valuations', ['account_id', 'date', 'amount'])]:
+        paths['/' + resource]['get']['parameters'].extend([
+            {'name': 'sort_by', 'in': 'query', 'schema': string(enum=fields), 'description': 'Sort all matching records before pagination. Account and category columns use their displayed names; amounts use signed native-currency values.'},
+            {'name': 'sort_direction', 'in': 'query', 'schema': string(enum=['asc', 'desc'], default='asc')},
+        ])
     paths['/auth/session'] = {'get': operation('Read session and CSRF token', ref('Session'))}
     paths['/auth/session']['get']['security'] = []
     for name in ('setup', 'login'):

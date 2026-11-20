@@ -1021,6 +1021,33 @@
               "default": false
             },
             "description": "Include opening, valuation, and reconciliation journals."
+          },
+          {
+            "name": "sort_by",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "description",
+                "date",
+                "category",
+                "account",
+                "amount"
+              ]
+            },
+            "description": "Sort all matching records before pagination. Account and category columns use their displayed names; amounts use signed native-currency values."
+          },
+          {
+            "name": "sort_direction",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "asc"
+            }
           }
         ]
       },
@@ -1408,8 +1435,7 @@
                     "enum": [
                       "Income",
                       "Expense",
-                      "Transfer",
-                      "Return"
+                      "Transfer"
                     ]
                   },
                   "currency": {
@@ -1475,7 +1501,7 @@
                   },
                   "destination_currency": {
                     "type": "string",
-                    "description": "Defaults to the destination account currency; Returns use the transaction currency."
+                    "description": "Defaults to the destination account currency."
                   },
                   "revision": {
                     "type": "integer"
@@ -3638,7 +3664,12 @@
                     "type": "string"
                   },
                   "type": {
-                    "type": "string"
+                    "type": "string",
+                    "enum": [
+                      "Income",
+                      "Expense",
+                      "Transfer"
+                    ]
                   },
                   "source_account_id": {
                     "type": "string",
@@ -6326,6 +6357,31 @@
             "in": "query",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "sort_by",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "account_id",
+                "date",
+                "amount"
+              ]
+            },
+            "description": "Sort all matching records before pagination. Account and category columns use their displayed names; amounts use signed native-currency values."
+          },
+          {
+            "name": "sort_direction",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "asc"
             }
           }
         ]
@@ -13087,8 +13143,7 @@
             "enum": [
               "Income",
               "Expense",
-              "Transfer",
-              "Return"
+              "Transfer"
             ]
           },
           "currency": {
@@ -13169,7 +13224,7 @@
           },
           "destination_currency": {
             "type": "string",
-            "description": "Defaults to the destination account currency; Returns use the transaction currency."
+            "description": "Defaults to the destination account currency."
           },
           "destination_usd_amount": {
             "type": "string",
@@ -13195,10 +13250,6 @@
                 "fx_rate"
               ]
             }
-          },
-          "return_account_type": {
-            "type": "string",
-            "description": "Original investment account type retained for historical Returns."
           }
         },
         "required": [
@@ -13293,7 +13344,12 @@
             "type": "string"
           },
           "type": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "Income",
+              "Expense",
+              "Transfer"
+            ]
           },
           "source_account_id": {
             "type": "string",
@@ -13360,10 +13416,6 @@
           },
           "active": {
             "type": "boolean"
-          },
-          "return_account_type": {
-            "type": "string",
-            "description": "Original investment account type retained for historical Returns."
           }
         },
         "required": [
@@ -14739,8 +14791,7 @@
             "enum": [
               "Income",
               "Expense",
-              "Transfer",
-              "Return"
+              "Transfer"
             ]
           },
           "currency": {
@@ -14806,7 +14857,7 @@
           },
           "destination_currency": {
             "type": "string",
-            "description": "Defaults to the destination account currency; Returns use the transaction currency."
+            "description": "Defaults to the destination account currency."
           }
         },
         "required": [
@@ -14847,7 +14898,12 @@
             "type": "string"
           },
           "type": {
-            "type": "string"
+            "type": "string",
+            "enum": [
+              "Income",
+              "Expense",
+              "Transfer"
+            ]
           },
           "source_account_id": {
             "type": "string",

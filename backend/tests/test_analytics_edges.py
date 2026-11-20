@@ -36,10 +36,9 @@ def transaction(source, destination, amount, when, typ='Transfer', **kwargs):
                        'amount': amount, 'date': when, 'type': typ, 'description': 'Example', **kwargs}, None)
 
 
-def test_performance_cash_return_and_fee_count_once(household):
+def test_performance_valuation_gain_and_fee_count_once(household):
     portfolio = account()
     valuation(portfolio, '2024-01-01', '100')
-    transaction(portfolio.id, portfolio.id, '5', '2024-06-01', 'Return')
     transaction(portfolio.id, system_id('expense'), '2', '2024-06-02', 'Expense', investment_fee=True)
     valuation(portfolio, '2025-01-01', '108')
     result = performance(portfolio.id)
@@ -56,12 +55,49 @@ def test_reconciliation_is_external_capital_not_a_gain(household):
     weight = D((date(2025, 1, 1) - date(2024, 7, 1)).days) / D(366)
     assert abs(D(result['cumulative_return']) - D(10) / (D(100) + weight * 20)) < D('1e-90')
     assert D(result['intervals'][0]['external_flows']) == 20
+    flow = result['intervals'][0]['cash_flows'][0]
+    assert flow['kind'] == 'Balance correction'
+    assert D(flow['amount']) == 20
+    assert D(flow['weight']) == weight
 
 
-def test_negative_return_counts_as_loss_not_external_flow(household):
+def test_performance_shows_signed_flows_weights_and_period_calculations(household):
+    portfolio = account()
+    cash = account('Cash', '1000', typ='Checking')
+    transaction(cash.id, portfolio.id, '10', '2024-01-01')
+    valuation(portfolio, '2024-01-01', '100')
+    contribution = transaction(cash.id, portfolio.id, '40', '2024-01-06')
+    withdrawal = transaction(portfolio.id, cash.id, '10', '2024-01-11')
+    transaction(portfolio.id, system_id('expense'), '2', '2024-01-08', 'Expense', investment_fee=True)
+    valuation(portfolio, '2024-01-11', '142')
+    valuation(portfolio, '2024-01-21', '156.2')
+
+    result = performance(portfolio.id)
+    first, second = result['intervals']
+    assert first['days'] == 10
+    assert D(first['starting_value']) == 100
+    assert D(first['ending_value']) == 142
+    assert D(first['external_flows']) == 30
+    assert D(first['weighted_flows']) == 20
+    assert D(first['gain']) == 12
+    assert D(first['weighted_capital']) == 120
+    assert D(first['return_rate']) == D('.1')
+    flows = first['cash_flows']
+    assert [flow['id'] for flow in flows] == [contribution.id, withdrawal.id]
+    assert [flow['remaining_days'] for flow in flows] == [5, 0]
+    assert [D(flow['amount']) for flow in flows] == [40, -10]
+    assert [D(flow['weight']) for flow in flows] == [D('.5'), 0]
+    assert [D(flow['weighted_amount']) for flow in flows] == [20, 0]
+    assert second['cash_flows'] == []
+    assert D(second['weighted_flows']) == 0
+    assert D(second['return_rate']) == D('.1')
+    assert D(result['cumulative_return']) == D('.21')
+    assert result['annualized_return'] is None
+
+
+def test_valuation_loss_is_not_an_external_flow(household):
     portfolio = account()
     valuation(portfolio, '2024-01-01', '100')
-    transaction(portfolio.id, portfolio.id, '-12', '2024-06-01', 'Return')
     valuation(portfolio, '2025-01-01', '88')
     result = performance(portfolio.id)
     assert D(result['cumulative_return']) == D('-.12')

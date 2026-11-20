@@ -1,6 +1,12 @@
 "use client";
 
 import { useState } from "react";
+import {
+  compareAmounts,
+  signedTransactionAmount,
+  TableSort,
+  toggleSort,
+} from "@/lib/table-sort";
 import { HoardEggIcon } from "./hoard-art";
 import {
   ArrowDownToLine,
@@ -322,7 +328,7 @@ export function useFields(resource: string): FieldSpec[] {
         type: "select",
         required: true,
         default: "Expense",
-        options: ["Expense", "Income", "Transfer", "Return"].map((v) => ({
+        options: ["Expense", "Income", "Transfer"].map((v) => ({
           value: v,
           label: v,
         })),
@@ -482,35 +488,137 @@ export function DeleteDialog({
   );
 }
 
+function SortHeader({
+  label,
+  column,
+  sort,
+  onSort,
+  numeric = false,
+}: {
+  label: string;
+  column: string;
+  sort: TableSort | null;
+  onSort: (key: string) => void;
+  numeric?: boolean;
+}) {
+  const active = sort?.key === column;
+  return (
+    <th
+      className={numeric ? "number" : undefined}
+      aria-sort={
+        active
+          ? sort.direction === "asc"
+            ? "ascending"
+            : "descending"
+          : "none"
+      }
+    >
+      <button
+        className="sort-header"
+        onClick={() => onSort(column)}
+        title={`Sort by ${label.toLowerCase()}`}
+      >
+        {label}
+        <span aria-hidden="true">
+          {active ? (sort.direction === "asc" ? "↑" : "↓") : "↕"}
+        </span>
+      </button>
+    </th>
+  );
+}
+
 export function TransactionTable({
   items,
   onEdit,
   onDelete,
+  sort: externalSort,
+  onSort,
 }: {
   items: Entity[];
   onEdit: (r: Entity) => void;
   onDelete?: (r: Entity) => void;
+  sort?: TableSort | null;
+  onSort?: (key: string) => void;
 }) {
   const { accounts, categories } = useApp();
+  const [localSort, setLocalSort] = useState<TableSort | null>(null);
+  const sort = onSort ? externalSort || null : localSort;
+  const changeSort =
+    onSort || ((key: string) => setLocalSort(toggleSort(localSort, key)));
   const name = (id: string) =>
     accounts.find((a: Entity) => a.id === id)?.name || "—";
+  const category = (id: string) =>
+    categories.find((c: Entity) => c.id === id)?.name || "Uncategorized";
+  const accountName = (t: Entity) =>
+    name(t.type === "Income" ? t.destination_account_id : t.source_account_id);
+  const sortedItems =
+    !onSort && sort
+      ? [...items].sort((a, b) => {
+          const value = (t: Entity) =>
+            String(
+              sort.key === "account"
+                ? accountName(t)
+                : sort.key === "category"
+                  ? category(t.category_id)
+                  : t[sort.key] || "",
+            ).toLowerCase();
+          const comparison =
+            sort.key === "amount"
+              ? compareAmounts(
+                  signedTransactionAmount(a),
+                  signedTransactionAmount(b),
+                )
+              : value(a) < value(b)
+                ? -1
+                : value(a) > value(b)
+                  ? 1
+                  : 0;
+          return comparison * (sort.direction === "asc" ? 1 : -1);
+        })
+      : items;
   return (
     <div className="table-wrap">
       <table>
         <thead>
           <tr>
-            <th>Transaction</th>
-            <th>Date</th>
-            <th>Category</th>
-            <th>Account</th>
-            <th className="number">Amount</th>
+            <SortHeader
+              label="Transaction"
+              column="description"
+              sort={sort}
+              onSort={changeSort}
+            />
+            <SortHeader
+              label="Date"
+              column="date"
+              sort={sort}
+              onSort={changeSort}
+            />
+            <SortHeader
+              label="Category"
+              column="category"
+              sort={sort}
+              onSort={changeSort}
+            />
+            <SortHeader
+              label="Account"
+              column="account"
+              sort={sort}
+              onSort={changeSort}
+            />
+            <SortHeader
+              label="Amount"
+              column="amount"
+              sort={sort}
+              onSort={changeSort}
+              numeric
+            />
             <th>
               <span className="sr-only">Actions</span>
             </th>
           </tr>
         </thead>
         <tbody>
-          {items.map((t) => (
+          {sortedItems.map((t) => (
             <tr key={t.id}>
               <td>
                 <button className="table-link" onClick={() => onEdit(t)}>
@@ -538,7 +646,7 @@ export function TransactionTable({
               <td>
                 <span className="account-cell">
                   {name(
-                    t.type === "Income" || t.type === "Return"
+                    t.type === "Income"
                       ? t.destination_account_id
                       : t.source_account_id,
                   )}
@@ -548,7 +656,7 @@ export function TransactionTable({
                 </div>
               </td>
               <td
-                className={`number amount ${Number(t.amount) < 0 || (t.type === "Expense" && !t.is_refund) ? "negative" : t.type === "Income" || t.type === "Return" || t.is_refund ? "positive" : ""}`}
+                className={`number amount ${Number(t.amount) < 0 || (t.type === "Expense" && !t.is_refund) ? "negative" : t.type === "Income" || t.is_refund ? "positive" : ""}`}
               >
                 {t.type === "Expense" && !t.is_refund
                   ? "−"
@@ -601,6 +709,7 @@ export function Transactions({
 }) {
   const { accounts, categories, tags, subscriptions, version } = useApp();
   const [page, setPage] = useState(1);
+  const [sort, setSort] = useState<TableSort | null>(null);
   const [filters, setFilters] = useState<Record<string, string>>({
     account_id: accountId || "",
     q: "",
@@ -616,7 +725,7 @@ export function Transactions({
   const [editor, setEditor] = useState<Entity | null | undefined>();
   const [removed, setRemoved] = useState<Entity | null>(null);
   const { data, loading, error } = useLoad<ListResult>(
-    `/transactions?${query({ ...filters, page, page_size: 25 })}`,
+    `/transactions?${query({ ...filters, page, page_size: 25, sort_by: sort?.key, sort_direction: sort?.direction })}`,
     { items: [], total: 0, page: 1, page_size: 25 },
     version,
   );
@@ -678,7 +787,7 @@ export function Transactions({
             onChange={(e) => change("type", e.target.value)}
           >
             <option value="">All types</option>
-            {["Income", "Expense", "Transfer", "Return"].map((t) => (
+            {["Income", "Expense", "Transfer"].map((t) => (
               <option key={t}>{t}</option>
             ))}
           </select>
@@ -769,6 +878,13 @@ export function Transactions({
         ) : data.items.length ? (
           <TransactionTable
             items={data.items}
+            sort={sort || { key: "date", direction: "desc" }}
+            onSort={(key) => {
+              setSort(
+                toggleSort(sort || { key: "date", direction: "desc" }, key),
+              );
+              setPage(1);
+            }}
             onEdit={setEditor}
             onDelete={setRemoved}
           />
@@ -1255,10 +1371,11 @@ export function ResourceTable({
   const { version } = useApp();
   const fields = useFields(resource);
   const [page, setPage] = useState(1);
+  const [sort, setSort] = useState<TableSort | null>(null);
   const [editor, setEditor] = useState<Entity | null | undefined>();
   const [removed, setRemoved] = useState<Entity | null>(null);
   const { data, loading, error } = useLoad<ListResult>(
-    `/${resource}?page=${page}&page_size=25`,
+    `/${resource}?${query({ page, page_size: 25, sort_by: resource === "valuations" ? sort?.key : undefined, sort_direction: resource === "valuations" ? sort?.direction : undefined })}`,
     { items: [], total: 0, page: 1, page_size: 25 },
     version,
   );
@@ -1307,9 +1424,22 @@ export function ResourceTable({
             <table>
               <thead>
                 <tr>
-                  {columns.map((c) => (
-                    <th key={c.key}>{c.label}</th>
-                  ))}
+                  {columns.map((c) =>
+                    resource === "valuations" ? (
+                      <SortHeader
+                        key={c.key}
+                        label={c.label}
+                        column={c.key}
+                        sort={sort}
+                        onSort={(key) => {
+                          setSort(toggleSort(sort, key));
+                          setPage(1);
+                        }}
+                      />
+                    ) : (
+                      <th key={c.key}>{c.label}</th>
+                    ),
+                  )}
                   <th>
                     <span className="sr-only">Actions</span>
                   </th>

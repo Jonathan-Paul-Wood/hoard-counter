@@ -87,6 +87,21 @@ def create_expense(create, amount='10', **extra):
     return account, transaction
 
 
+def test_legacy_archive_cannot_reintroduce_returns(household_factory):
+    _, client, headers, create = household_factory()
+    account = create('accounts', {'name': 'Investment', 'type': 'Brokerage',
+                                 'opening_balance': '100', 'opening_date': '2024-01-01'})
+    data = {'id': str(uuid4()), 'last_modified': '2026-01-01T00:00:00Z',
+            'source_account_id': account['id'], 'destination_account_id': account['id'],
+            'date': '2025-01-01', 'type': 'Return', 'amount': '10', 'description': 'Legacy gain'}
+    response = preview(client, headers, archive_payload([{'kind': 'transaction', 'record': data}]))
+    assert response.status_code == 200, response.json
+    assert response.json['errors']
+    result = client.post('/api/v1/imports/commit', headers=headers, json={'token': response.json['token']})
+    assert result.status_code == 409
+    assert client.get('/api/v1/accounts/' + account['id']).json['balance'] == '100'
+
+
 def test_full_archive_preserves_historic_fx_valuation_and_reconciliation(household_factory):
     app, source, headers, create = household_factory()
     rate = create('rates', {'currency': 'EUR', 'date': '2024-01-01', 'rate': '1.1'})

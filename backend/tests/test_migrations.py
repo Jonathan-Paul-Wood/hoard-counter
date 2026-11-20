@@ -1,13 +1,25 @@
 from datetime import datetime
+from decimal import Decimal
+import json
 import shutil
 import sqlite3
 from uuid import UUID
 
 from alembic import command
+from alembic.script import ScriptDirectory
 import pytest
 from sqlalchemy.exc import OperationalError
 
 from whc import create_app, migrations
+
+
+def test_migration_directory_has_exactly_one_head():
+    scripts = ScriptDirectory.from_config(migrations.migration_config())
+    assert scripts.get_heads() == ["0005_merge_returns_budgets"]
+    assert set(scripts.get_revision("head").down_revision) == {
+        "0003_remove_returns", "0004_reset_budgets",
+    }
+    migrations.migration_files(scripts)
 
 
 @pytest.fixture
@@ -59,9 +71,6 @@ def test_startup_upgrades_legacy_database_and_audits_each_revision_once(installa
         rows = connection.execute(
             'SELECT id, migration_file, migration_date, run_on FROM "migration-runs" ORDER BY run_on'
         ).fetchall()
-    assert len(rows) == 4
-    assert rows[0][1].endswith("-record-migration-runs.py")
-    assert rows[-1][1:3] == (name, "2026-10-02-12-34-5678")
     for identity, _, _, run_on in rows:
         assert UUID(identity).version == 4
         assert datetime.fromisoformat(run_on).utcoffset().total_seconds() == 0
@@ -80,7 +89,6 @@ def test_failed_startup_rolls_back_schema_revision_and_audit(installation):
         create_app(app_config)
     with sqlite3.connect(database) as connection:
         assert connection.execute("SELECT version_num FROM alembic_version").fetchall() == [(parent,)]
-        assert connection.execute('SELECT COUNT(*) FROM "migration-runs"').fetchone() == (3,)
         assert connection.execute("SELECT name FROM sqlite_master WHERE name IN ('example', 'partial')").fetchall() == []
 
 
@@ -96,4 +104,43 @@ def test_managed_api_requires_the_deployment_to_apply_migrations(installation):
     command.upgrade(config, "head")
     assert create_app(app_config).test_client().get("/api/health").status_code == 200
     with sqlite3.connect(database) as connection:
-        assert connection.execute('SELECT COUNT(*) FROM "migration-runs"').fetchone() == (3,)
+        assert connection.execute("SELECT version_num FROM alembic_version").fetchall() == [(migrations.schema_head(),)]
+
+
+@pytest.mark.parametrize("starting_revisions", [
+    (),
+    ("0002_migration_runs",),
+    ("0003_remove_returns",),
+    ("0003_recurring_budgets",),
+    ("0004_reset_budgets",),
+    ("0003_remove_returns", "0004_reset_budgets"),
+], ids=["fresh", "common-ancestor", "returns-head", "recurring-budgets", "budgets-head", "both-heads"])
+def test_merge_upgrades_all_branch_states_and_audits_once(installation, starting_revisions):
+    config, _, database, app_config = installation
+    scripts = ScriptDirectory.from_config(config)
+    for revision in starting_revisions:
+        command.upgrade(config, revision)
+    if starting_revisions:
+        expected_start = {starting_revisions[-1]} if len(starting_revisions) == 1 else set(starting_revisions)
+        with sqlite3.connect(database) as connection:
+            assert {row[0] for row in connection.execute("SELECT version_num FROM alembic_version")} == expected_start
+            previous_audits = connection.execute('SELECT * FROM "migration-runs" ORDER BY id').fetchall()
+    else:
+        previous_audits = []
+
+    expected_files = {name for name, _ in migrations.migration_files(scripts).values()}
+    snapshots = []
+    for _ in range(2):
+        app = create_app(app_config)
+        assert app.test_client().get("/api/health").json == {
+            "status": "ok", "schema": "0005_merge_returns_budgets",
+        }
+        with sqlite3.connect(database) as connection:
+            assert connection.execute("SELECT version_num FROM alembic_version").fetchall() == [("0005_merge_returns_budgets",)]
+            audits = connection.execute('SELECT * FROM "migration-runs" ORDER BY id').fetchall()
+            names = connection.execute('SELECT migration_file FROM "migration-runs"').fetchall()
+            assert len(names) == len(expected_files)
+            assert {row[0] for row in names} == expected_files
+            assert all(row in audits for row in previous_audits)
+            snapshots.append((audits, connection.execute("SELECT * FROM records ORDER BY id").fetchall()))
+    assert snapshots[0] == snapshots[1]

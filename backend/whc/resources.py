@@ -1,4 +1,5 @@
 from datetime import date
+from decimal import Decimal
 from flask import Blueprint, current_app, g, jsonify, request
 
 from .auth import login_required, admin_required
@@ -12,6 +13,37 @@ bp = Blueprint("resources", __name__)
 RESOURCE_KINDS = {"accounts": "account", "transactions": "transaction", "categories": "category", "tags": "tag",
                   "subscriptions": "subscription", "rules": "rule", "budgets": "budget", "rates": "rate",
                   "valuations": "valuation", "scenarios": "scenario", "currencies": "currency"}
+
+SORT_FIELDS = {
+    'transaction': ('description', 'date', 'category', 'account', 'amount'),
+    'valuation': ('account_id', 'date', 'amount'),
+}
+
+
+def sort_records(records, kind, field, direction):
+    if field not in SORT_FIELDS.get(kind, ()):
+        raise ApiError('Unsupported sort column')
+    if direction not in ('asc', 'desc'):
+        raise ApiError('sort_direction must be asc or desc')
+    accounts = {r.id: r.data.get('name', '—') for r in list_records('account')}
+    categories = {r.id: r.data.get('name', 'Uncategorized') for r in list_records('category')}
+
+    def key(record):
+        row = record.data
+        if field == 'amount':
+            amount = Decimal(row['amount'])
+            return amount.copy_negate() if kind == 'transaction' and row['type'] == 'Expense' and not row.get('is_refund') else amount
+        if field == 'account_id':
+            return accounts.get(row.get('account_id'), row.get('account_id', '')).casefold()
+        if field == 'account':
+            account_id = row.get('destination_account_id') if row['type'] == 'Income' else row.get('source_account_id')
+            return accounts.get(account_id, '—').casefold()
+        if field == 'category':
+            return categories.get(row.get('category_id'), 'Uncategorized').casefold()
+        return str(row.get(field) or '').casefold()
+
+    # Stable ID ordering keeps tied values consistent across pages.
+    return sorted(sorted(records, key=lambda r: r.id), key=key, reverse=direction == 'desc')
 
 
 def body():
@@ -67,6 +99,8 @@ def collection(resource):
         records.sort(key=lambda r: (r.data.get("date", ""), r.last_modified), reverse=True)
     elif kind in ("account", "category", "tag", "subscription", "rule", "scenario"):
         records.sort(key=lambda r: r.data.get("name", "").casefold())
+    if request.args.get('sort_by'):
+        records = sort_records(records, kind, request.args['sort_by'], request.args.get('sort_direction', 'asc'))
     try:
         page, size = int(request.args.get("page", 1)), int(request.args.get("page_size", 50))
         if page < 1 or not 1 <= size <= 500:

@@ -756,6 +756,70 @@ input[type="file"]::file-selector-button {
 .bar-track > span.over {
   background: #b17b59;
 }
+.sort-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.sort-header:hover,
+.sort-header:focus-visible {
+  color: var(--green);
+}
+.sort-header:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 4px;
+}
+.performance-calculation {
+  border-top: 1px solid var(--line);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.performance-calculation h3,
+.performance-calculation h4 {
+  margin: 16px 0 8px;
+}
+.performance-period {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+  margin: 12px 0;
+}
+.performance-period summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.performance-inputs > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 6px 0;
+}
+.performance-inputs dd {
+  margin: 0;
+  text-align: right;
+}
+.performance-calculation caption {
+  text-align: left;
+  padding: 8px 0;
+  font-weight: 600;
+}
+.performance-steps {
+  padding-left: 22px;
+}
+.performance-steps li {
+  margin: 12px 0;
+}
+.performance-formula,
+.performance-steps li div {
+  overflow-wrap: anywhere;
+  font-variant-numeric: tabular-nums;
+}
 .holdings-summary {
   padding: 4px 22px 18px;
 }
@@ -1006,7 +1070,6 @@ td strong {
   color: #87977a;
 }
 .type-badge.income,
-.type-badge.return,
 .type-badge.refund {
   color: #7b9567;
 }
@@ -1344,6 +1407,14 @@ td strong {
   margin-right: auto;
   font-size: 9px;
   max-width: 230px;
+}
+.transaction-footer {
+  flex-wrap: wrap;
+}
+.transaction-create-another {
+  flex: 1 1 200px;
+  margin-right: auto;
+  cursor: pointer;
 }
 .plain-fieldset {
   border: 0;

@@ -12,7 +12,7 @@ import re
 from flask import current_app
 from sqlalchemy import select
 from .models import db, Record, Posting, AuditEvent, utcnow, new_id
-from .validation import (ApiError, ACCOUNT_TYPES, ASSET_TYPES, LIABILITY_TYPES, INVESTMENT_TYPES,
+from .validation import (ApiError, ACCOUNT_TYPES, ASSET_TYPES, LIABILITY_TYPES,
                          TRANSACTION_TYPES, amount, currency_code, date_string,
                          decimal, identifier, money, quantize, required_text, timestamp, CURRENCIES)
 from .recurrence import occurrences
@@ -185,21 +185,12 @@ def _validate_account(data, existing, preserve_snapshots=False):
 
 
 def _validate_transaction(data, existing=None, preserve_snapshots=False, historical=False):
+    if data.get("type") not in TRANSACTION_TYPES:
+        raise ApiError("Choose Income, Expense, or Transfer")
     source = _reference(data, "source_account_id", "account", True, historical)
     destination = _reference(data, "destination_account_id", "account", True, historical)
-    is_return = data.get("type") == "Return"
-    if is_return:
-        return_type = source.data.get("type")
-        if existing and existing.data.get("type") == "Return" and existing.data.get("source_account_id") == source.id:
-            return_type = existing.data.get("return_account_type", return_type)
-        elif preserve_snapshots:
-            return_type = data.get("return_account_type", return_type)
-        if source.id != destination.id or return_type not in INVESTMENT_TYPES or source.data.get("account_class") != "asset":
-            raise ApiError("Returns require the same investment account as source and destination")
-    elif source.id == destination.id:
+    if source.id == destination.id:
         raise ApiError("Source and destination must be different accounts")
-    if data.get("type") not in TRANSACTION_TYPES:
-        raise ApiError("Choose Income, Expense, Transfer, or Return")
     required_text(data, "description", 1000)
     data["date"] = date_string(data.get("date"))
     if not historical:
@@ -212,7 +203,6 @@ def _validate_transaction(data, existing=None, preserve_snapshots=False, histori
     sclass, dclass = source.data["account_class"], destination.data["account_class"]
     financial = {"asset", "liability"}
     valid = {"Income": sclass == "income" and dclass in financial,
-             "Return": is_return,
              "Transfer": sclass in financial and dclass in financial,
              "Expense": (sclass in financial and dclass == "expense") or (bool(data.get("is_refund")) and sclass == "expense" and dclass in financial)}
     if not valid[data["type"]]:
@@ -222,12 +212,8 @@ def _validate_transaction(data, existing=None, preserve_snapshots=False, histori
     if data.get("investment_fee") and (data["type"] != "Expense" or data.get("is_refund")):
         raise ApiError("Investment fees must be outgoing expenses")
     data["currency"] = currency_code(data.get("currency") or source.data["currency"])
-    data["destination_currency"] = currency_code(data.get("destination_currency") or (data["currency"] if is_return else destination.data["currency"]))
-    if is_return and data["destination_currency"] != data["currency"]:
-        raise ApiError("Return currencies must agree")
-    data["amount"] = amount(data.get("amount"), data["currency"], positive=not is_return)
-    if is_return and decimal(data["amount"]) == 0:
-        raise ApiError("Return amount must be positive or negative, not zero")
+    data["destination_currency"] = currency_code(data.get("destination_currency") or destination.data["currency"])
+    data["amount"] = amount(data.get("amount"), data["currency"], positive=True)
     # Preserve the exact saved conversion when an unrelated field is edited.
     s_changed = not existing or any(data.get(k) != existing.data.get(k) for k in ("date", "source_account_id", "currency"))
     d_changed = not existing or any(data.get(k) != existing.data.get(k) for k in ("date", "destination_account_id", "destination_currency"))
@@ -239,13 +225,10 @@ def _validate_transaction(data, existing=None, preserve_snapshots=False, histori
         data["destination_fx_rate"] = money(rate_for(data["destination_currency"], data["date"]))
     if decimal(data["fx_rate"], "fx_rate") <= 0 or decimal(data["destination_fx_rate"], "destination_fx_rate") <= 0:
         raise ApiError("Conversion rates must be positive")
-    if is_return:
-        # Both fields represent one account; use the same saved conversion.
-        data["destination_fx_rate"] = data["fx_rate"]
     data["usd_amount"] = money(decimal(data["amount"]) * decimal(data["fx_rate"]))
     if not data.get("destination_amount"):
         data["destination_amount"] = money(quantize(decimal(data["usd_amount"]) / decimal(data["destination_fx_rate"]), data["destination_currency"]))
-    data["destination_amount"] = amount(data["destination_amount"], data["destination_currency"], "destination_amount", positive=not is_return)
+    data["destination_amount"] = amount(data["destination_amount"], data["destination_currency"], "destination_amount", positive=True)
     data["destination_usd_amount"] = money(decimal(data["destination_amount"]) * decimal(data["destination_fx_rate"]))
     if data["currency"] == data["destination_currency"] and decimal(data["amount"]) != decimal(data["destination_amount"]):
         raise ApiError("Amounts must agree for a transfer in the same currency; record fees separately")
@@ -325,23 +308,15 @@ def _validate(kind, data, existing, preserve_snapshots=False, historical=False):
             raise ApiError("Budget amount cannot be negative")
     elif kind == "subscription":
         required_text(data, "name", 160)
+        data["type"] = data.get("type", "Expense")
+        if data["type"] not in TRANSACTION_TYPES:
+            raise ApiError("Unsupported subscription transaction type")
         source = _reference(data, "source_account_id", "account", True, historical)
         _reference(data, "destination_account_id", "account", True, historical)
-        is_return = data.get("type") == "Return"
-        if is_return:
-            return_type = source.data.get("type")
-            if existing and existing.data.get("type") == "Return" and existing.data.get("source_account_id") == source.id:
-                return_type = existing.data.get("return_account_type", return_type)
-            elif preserve_snapshots:
-                return_type = data.get("return_account_type", return_type)
-            if data["source_account_id"] != data["destination_account_id"] or return_type not in INVESTMENT_TYPES or source.data.get("account_class") != "asset":
-                raise ApiError("Returns require the same investment account as source and destination")
-        elif data["source_account_id"] == data["destination_account_id"]:
+        if data["source_account_id"] == data["destination_account_id"]:
             raise ApiError("Subscription accounts must differ")
         data["currency"] = currency_code(data.get("currency", source.data["currency"]))
-        data["amount"] = amount(data.get("amount"), data["currency"], positive=not is_return)
-        if is_return and decimal(data["amount"]) == 0:
-            raise ApiError("Return amount must be positive or negative, not zero")
+        data["amount"] = amount(data.get("amount"), data["currency"], positive=True)
         data["amount_tolerance"] = amount(data.get("amount_tolerance", "0"), data["currency"], "amount_tolerance")
         if decimal(data["amount_tolerance"]) < 0:
             raise ApiError("Amount tolerance cannot be negative")
@@ -350,9 +325,6 @@ def _validate(kind, data, existing, preserve_snapshots=False, historical=False):
         data["frequency"] = data.get("frequency", "monthly")
         if data["frequency"] not in ("daily", "weekly", "monthly", "yearly"):
             raise ApiError("Unsupported recurrence frequency")
-        data["type"] = data.get("type", "Expense")
-        if data["type"] not in TRANSACTION_TYPES:
-            raise ApiError("Unsupported subscription transaction type")
         data["start_date"] = date_string(data.get("start_date"), "start_date")
         if data.get("end_date"):
             data["end_date"] = date_string(data["end_date"], "end_date")
@@ -540,12 +512,6 @@ def _replace_postings(record, entries):
 def _transaction_postings(record):
     data = record.data
     source_usd, destination_usd = decimal(data["usd_amount"]), decimal(data["destination_usd_amount"])
-    if data["type"] == "Return":
-        _replace_postings(record, [
-            (data["source_account_id"], decimal(data["amount"]), source_usd),
-            (system_id("income"), -source_usd, -source_usd),
-        ])
-        return
     entries = [(data["source_account_id"], -decimal(data["amount"]), -source_usd),
                (data["destination_account_id"], decimal(data["destination_amount"]), destination_usd)]
     difference = source_usd - destination_usd
@@ -679,15 +645,6 @@ def save_record(kind, data, actor, record_id=None, expected_revision=None, origi
     record = existing or Record(id=rid or new_id(), kind=kind)
     if not existing:
         db.session.add(record)
-    if kind == "account" and existing and existing.data.get("type") in INVESTMENT_TYPES and merged["type"] not in INVESTMENT_TYPES:
-        for linked in account_history(record.id) + list_records("subscription", True):
-            if linked.data.get("type") != "Return" or linked.data.get("source_account_id") != record.id or linked.data.get("return_account_type"):
-                continue
-            linked_before = linked.to_dict()
-            linked.data = {**linked.data, "return_account_type": existing.data["type"]}
-            linked.revision += 1
-            linked.last_modified = utcnow()
-            add_audit(linked.kind, linked.id, "update", actor, "account-type", linked_before, linked.to_dict())
     record.data = merged
     record.deleted = bool(incoming.get("deleted", False)) if preserve_modified else False
     record.revision = existing.revision + 1 if existing else 1

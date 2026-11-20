@@ -25,7 +25,7 @@ ASSET_TYPES = ["Asset", "Checking", "Savings", "Brokerage", "Roth IRA", "Traditi
 LIABILITY_TYPES = ["Credit Card", "Loan", "Mortgage", "Debt"]
 INVESTMENT_TYPES = ["Asset", "Brokerage", "Roth IRA", "Traditional IRA", "Roth 401K", "Traditional 401K", "HSA", "FSA", "529", "Crypto Cold Wallet"]
 ACCOUNT_TYPES = ASSET_TYPES + LIABILITY_TYPES + ["Income Source", "Expense Payee", "Equity"]
-TRANSACTION_TYPES = ["Income", "Expense", "Transfer", "Return"]
+TRANSACTION_TYPES = ["Income", "Expense", "Transfer"]
 
 
 def decimal(value, field="amount"):

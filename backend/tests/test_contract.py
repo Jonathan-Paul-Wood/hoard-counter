@@ -111,3 +111,12 @@ def test_files_currency_definitions_and_action_payloads_are_accurate():
 def test_committed_openapi_artifact_matches_source():
     root = Path(__file__).resolve().parents[2]
     assert json.loads((root / 'openapi.json').read_text(encoding='utf-8')) == specification()
+
+
+def test_transaction_and_subscription_types_exclude_returns():
+    from whc.validation import TRANSACTION_TYPES
+    assert TRANSACTION_TYPES == ['Income', 'Expense', 'Transfer']
+    schemas = specification()['components']['schemas']
+    for name in ('Transaction', 'TransactionInput', 'Subscription', 'SubscriptionInput'):
+        assert schemas[name]['properties']['type']['enum'] == TRANSACTION_TYPES
+        assert 'return_account_type' not in schemas[name]['properties']
