@@ -257,6 +257,7 @@ export function TransactionEditor({
   const [error, setError] = useState("");
   const [savedId, setSavedId] = useState<string | null>(null);
   const [completedUploads, setCompletedUploads] = useState<number[]>([]);
+  const [createAnother, setCreateAnother] = useState(false);
   useEffect(() => {
     if (!record?.id) return;
     let active = true;
@@ -385,7 +386,13 @@ export function TransactionEditor({
       }
       notify(`Transaction ${record ? "updated" : "recorded"}.`);
       refresh();
-      onClose();
+      if (!record && createAnother) {
+        setSavedId(null);
+        setCompletedUploads([]);
+        setFiles([]);
+      } else {
+        onClose();
+      }
     } catch (e) {
       setError(errorMessage(e));
       notify(errorMessage(e), "error");
@@ -444,7 +451,9 @@ export function TransactionEditor({
             </Field>
             <Field
               label={
-                values.type === "Return" ? "Asset or investment account" : "From account"
+                values.type === "Return"
+                  ? "Asset or investment account"
+                  : "From account"
               }
             >
               <select
@@ -732,10 +741,22 @@ export function TransactionEditor({
           </p>
         )}
         <ErrorBox error={error} />
-        <div className="modal-footer">
-          <span className="muted footer-note">
-            Every transaction keeps the ledger balanced.
-          </span>
+        <div className="modal-footer transaction-footer">
+          {!record ? (
+            <label className="checkbox-line transaction-create-another">
+              <input
+                type="checkbox"
+                checked={createAnother}
+                disabled={busy}
+                onChange={(e) => setCreateAnother(e.target.checked)}
+              />
+              create another transaction
+            </label>
+          ) : (
+            <span className="muted footer-note">
+              Every transaction keeps the ledger balanced.
+            </span>
+          )}
           <Button type="button" variant="secondary" onClick={onClose}>
             Cancel
           </Button>

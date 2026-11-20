@@ -1396,6 +1396,14 @@ td strong {
   font-size: 9px;
   max-width: 230px;
 }
+.transaction-footer {
+  flex-wrap: wrap;
+}
+.transaction-create-another {
+  flex: 1 1 200px;
+  margin-right: auto;
+  cursor: pointer;
+}
 .plain-fieldset {
   border: 0;
   padding: 23px 28px 0;
