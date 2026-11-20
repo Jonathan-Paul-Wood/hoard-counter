@@ -3,13 +3,13 @@ export type EntityMeta = { id: string; revision: number; last_modified: string; 
 
 export type Account = { id: string; revision: number; last_modified: string; deleted?: boolean; name: string; type: string; account_class: "asset" | "liability" | "income" | "expense" | "equity"; currency: string; opening_balance?: string; opening_date?: string; opening_fx_rate?: string; balance: string; balance_usd?: string | null; signed_balance?: string; signed_balance_usd?: string | null; as_of?: string; valuation_date?: string | null; missing_rate?: boolean; account_number?: string | null; description?: string; opening_currency?: string; opening_posting_snapshots?: Record<string, unknown> };
 
-export type Transaction = { id: string; revision: number; last_modified: string; deleted?: boolean; source_account_id: string; destination_account_id: string; date: string; amount: string; destination_amount?: string; description: string; type: "Income" | "Expense" | "Transfer" | "Return"; currency?: string; usd_amount?: string; fx_rate?: string; destination_fx_rate?: string; category_id?: string | null; tag_ids?: Array<string>; notes?: string | null; subscription_id?: string | null; subscription_date?: string | null; is_refund?: boolean; investment_fee?: boolean; destination_currency?: string; destination_usd_amount?: string; posting_snapshots?: Record<string, unknown>; return_account_type?: string };
+export type Transaction = { id: string; revision: number; last_modified: string; deleted?: boolean; source_account_id: string; destination_account_id: string; date: string; amount: string; destination_amount?: string; description: string; type: "Income" | "Expense" | "Transfer"; currency?: string; usd_amount?: string; fx_rate?: string; destination_fx_rate?: string; category_id?: string | null; tag_ids?: Array<string>; notes?: string | null; subscription_id?: string | null; subscription_date?: string | null; is_refund?: boolean; investment_fee?: boolean; destination_currency?: string; destination_usd_amount?: string; posting_snapshots?: Record<string, unknown> };
 
 export type Category = { id: string; revision: number; last_modified: string; deleted?: boolean; name: string };
 
 export type Tag = { id: string; revision: number; last_modified: string; deleted?: boolean; name: string };
 
-export type Subscription = { id: string; revision: number; last_modified: string; deleted?: boolean; name: string; type?: string; source_account_id: string; destination_account_id: string; amount: string; currency?: string; start_date: string; end_date?: string | null; frequency: "daily" | "weekly" | "monthly" | "yearly"; interval?: number; category_id?: string | null; amount_tolerance?: string; day_tolerance?: number; active?: boolean; return_account_type?: string };
+export type Subscription = { id: string; revision: number; last_modified: string; deleted?: boolean; name: string; type?: "Income" | "Expense" | "Transfer"; source_account_id: string; destination_account_id: string; amount: string; currency?: string; start_date: string; end_date?: string | null; frequency: "daily" | "weekly" | "monthly" | "yearly"; interval?: number; category_id?: string | null; amount_tolerance?: string; day_tolerance?: number; active?: boolean };
 
 export type RuleCondition = { field: string; operator: "eq" | "neq" | "contains" | "gte" | "lte"; value: unknown };
 
@@ -89,13 +89,13 @@ export type ImportResult = { summary: ImportSummary; changes: Array<ImportChange
 
 export type AccountInput = { name: string; type: string; account_class?: "asset" | "liability" | "income" | "expense" | "equity"; currency?: string; opening_balance?: string; opening_date?: string; account_number?: string | null; description?: string; opening_currency?: string };
 
-export type TransactionInput = { source_account_id: string; destination_account_id: string; date: string; amount: string; destination_amount?: string; description: string; type: "Income" | "Expense" | "Transfer" | "Return"; currency?: string; category_id?: string | null; tag_ids?: Array<string>; notes?: string | null; subscription_id?: string | null; subscription_date?: string | null; is_refund?: boolean; investment_fee?: boolean; destination_currency?: string };
+export type TransactionInput = { source_account_id: string; destination_account_id: string; date: string; amount: string; destination_amount?: string; description: string; type: "Income" | "Expense" | "Transfer"; currency?: string; category_id?: string | null; tag_ids?: Array<string>; notes?: string | null; subscription_id?: string | null; subscription_date?: string | null; is_refund?: boolean; investment_fee?: boolean; destination_currency?: string };
 
 export type CategoryInput = { name: string };
 
 export type TagInput = { name: string };
 
-export type SubscriptionInput = { name: string; type?: string; source_account_id: string; destination_account_id: string; amount: string; currency?: string; start_date: string; end_date?: string | null; frequency?: "daily" | "weekly" | "monthly" | "yearly"; interval?: number; category_id?: string | null; amount_tolerance?: string; day_tolerance?: number; active?: boolean };
+export type SubscriptionInput = { name: string; type?: "Income" | "Expense" | "Transfer"; source_account_id: string; destination_account_id: string; amount: string; currency?: string; start_date: string; end_date?: string | null; frequency?: "daily" | "weekly" | "monthly" | "yearly"; interval?: number; category_id?: string | null; amount_tolerance?: string; day_tolerance?: number; active?: boolean };
 
 export type RuleInput = { name: string; priority?: number; enabled?: boolean; conditions: Array<RuleCondition>; actions: { category_id?: string | null; tag_ids?: Array<string>; notes?: string; subscription_id?: string | null }; match?: "all" | "any" };
 

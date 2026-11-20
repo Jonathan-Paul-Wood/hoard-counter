@@ -88,7 +88,7 @@ def expense_amount(row):
 def summarize(rows):
     categories = {r.id: r.data.get('name', '') for r in list_records('category')}
     groups, months = {}, {}
-    income = expenses = returns = ZERO
+    income = expenses = ZERO
     for row in rows:
         amount = dec(row.get('usd_amount'))
         month = row['date'][:7]
@@ -102,13 +102,11 @@ def summarize(rows):
         elif row.get('type') == 'Income':
             income += amount
             bucket['income'] += amount
-        elif row.get('type') == 'Return':
-            returns += amount
-            bucket['returns'] += amount
     return {
-        'summary': dict(income=text(income), expenses=text(expenses), returns=text(returns), net=text(income + returns - expenses)),
+        # Retain the legacy summary field for API/export compatibility.
+        'summary': dict(income=text(income), expenses=text(expenses), returns='0', net=text(income - expenses)),
         'category_spending': [dict(category_id=k, name=categories.get(k, 'Uncategorized'), amount=text(v)) for k, v in sorted(groups.items(), key=lambda kv: kv[1], reverse=True)],
-        'monthly_trend': [dict(month=k, **{f: text(v) for f, v in b.items()}, net=text(b['income'] + b['returns'] - b['expenses'])) for k, b in sorted(months.items())],
+        'monthly_trend': [dict(month=k, **{f: text(v) for f, v in b.items()}, net=text(b['income'] - b['expenses'])) for k, b in sorted(months.items())],
     }
 
 
@@ -295,7 +293,7 @@ def performance(account_id):
 
         for row in rows:
             when = date.fromisoformat(row['date'])
-            if not (begin < when <= end) or row.get('type') == 'Return' or row.get('investment_fee'):
+            if not (begin < when <= end) or row.get('investment_fee'):
                 continue
             incoming = row.get('destination_account_id') == account_id
             flow = (dec(row.get('destination_amount', row['amount'])) * dec(row.get('destination_fx_rate', row.get('fx_rate', '1')))) if incoming else -dec(row.get('usd_amount'))

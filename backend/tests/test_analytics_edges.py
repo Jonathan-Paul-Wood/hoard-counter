@@ -36,10 +36,9 @@ def transaction(source, destination, amount, when, typ='Transfer', **kwargs):
                        'amount': amount, 'date': when, 'type': typ, 'description': 'Example', **kwargs}, None)
 
 
-def test_performance_cash_return_and_fee_count_once(household):
+def test_performance_valuation_gain_and_fee_count_once(household):
     portfolio = account()
     valuation(portfolio, '2024-01-01', '100')
-    transaction(portfolio.id, portfolio.id, '5', '2024-06-01', 'Return')
     transaction(portfolio.id, system_id('expense'), '2', '2024-06-02', 'Expense', investment_fee=True)
     valuation(portfolio, '2025-01-01', '108')
     result = performance(portfolio.id)
@@ -69,7 +68,6 @@ def test_performance_shows_signed_flows_weights_and_period_calculations(househol
     valuation(portfolio, '2024-01-01', '100')
     contribution = transaction(cash.id, portfolio.id, '40', '2024-01-06')
     withdrawal = transaction(portfolio.id, cash.id, '10', '2024-01-11')
-    transaction(portfolio.id, portfolio.id, '5', '2024-01-07', 'Return')
     transaction(portfolio.id, system_id('expense'), '2', '2024-01-08', 'Expense', investment_fee=True)
     valuation(portfolio, '2024-01-11', '142')
     valuation(portfolio, '2024-01-21', '156.2')
@@ -97,10 +95,9 @@ def test_performance_shows_signed_flows_weights_and_period_calculations(househol
     assert result['annualized_return'] is None
 
 
-def test_negative_return_counts_as_loss_not_external_flow(household):
+def test_valuation_loss_is_not_an_external_flow(household):
     portfolio = account()
     valuation(portfolio, '2024-01-01', '100')
-    transaction(portfolio.id, portfolio.id, '-12', '2024-06-01', 'Return')
     valuation(portfolio, '2025-01-01', '88')
     result = performance(portfolio.id)
     assert D(result['cumulative_return']) == D('-.12')

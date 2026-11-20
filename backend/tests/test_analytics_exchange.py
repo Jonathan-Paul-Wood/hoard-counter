@@ -147,7 +147,7 @@ def test_new_csv_preview_is_atomic_and_commit_applies_rules(household):
     assert committed.json['summary']['create'] == 1
 
 
-def test_signed_returns_csv_preview_commit_and_export(household):
+def test_returns_csv_cannot_be_imported(household):
     app, client, headers, create, account, category = household
     investment = create('accounts', {'name': 'Investments', 'type': 'Brokerage', 'currency': 'USD',
                                     'opening_balance': '100', 'opening_date': '2024-01-01'})
@@ -158,22 +158,10 @@ def test_signed_returns_csv_preview_commit_and_export(household):
     preview = client.post('/api/v1/imports/preview', headers=headers,
         data={'kind': 'transactions', 'file': (io.BytesIO(payload), 'returns.csv')})
     assert preview.status_code == 200, preview.json
-    assert not preview.json['errors'], preview.json
-    assert not preview.json['conflicts'], preview.json
-    assert client.get('/api/v1/accounts/' + identity).json['balance'] == '100'
+    assert any('Choose Income, Expense, or Transfer' in error for error in preview.json['errors']), preview.json
     committed = client.post('/api/v1/imports/commit', headers=headers, json={'token': preview.json['token']})
-    assert committed.status_code == 200, committed.json
-    assert client.get('/api/v1/accounts/' + identity).json['balance'] == '90'
-    report = client.get('/api/v1/reports/data?start=2026-07-01&end=2026-07-31')
-    assert report.status_code == 200, report.json
-    assert report.json['summary']['returns'] == '-10'
-    exported = client.get('/api/v1/exports?format=transactions')
-    rows = list(csv.DictReader(io.StringIO(exported.data.decode('utf-8-sig'))))
-    assert sorted(row['amount'] for row in rows) == ['-25', '15']
-    preview = client.post('/api/v1/imports/preview', headers=headers,
-        data={'kind': 'transactions', 'file': (io.BytesIO(exported.data), 'returns.csv')})
-    assert not preview.json['errors'], preview.json
-    assert preview.json['summary']['skip'] == 2
+    assert committed.status_code == 409, committed.json
+    assert client.get('/api/v1/accounts/' + identity).json['balance'] == '100'
 
 
 def test_stale_preview_rejected(household):
@@ -186,12 +174,12 @@ def test_stale_preview_rejected(household):
     assert response.status_code == 409
 
 
-def test_generic_asset_returns_contribute_to_net_worth(household):
+def test_generic_asset_valuations_contribute_to_net_worth(household):
     app, client, headers, create, account, category = household
     home = create('accounts', {'name': 'Home', 'type': 'Asset', 'opening_balance': '400000', 'opening_date': '2024-01-01'})
     assert home['account_class'] == 'asset'
-    for amount in ('20000', '-5000'):
-        create('transactions', {'type': 'Return', 'source_account_id': home['id'], 'destination_account_id': home['id'], 'amount': amount, 'date': '2024-02-01', 'description': 'Home valuation change'})
+    for when, amount in [('2024-02-01', '420000'), ('2024-03-01', '415000')]:
+        create('valuations', {'account_id': home['id'], 'amount': amount, 'date': when})
     assert Decimal(client.get('/api/v1/accounts/' + home['id']).json['balance']) == 415000
     summary = client.get('/api/v1/dashboard?start=2024-01-01&end=2024-12-31').json
     assert Decimal(summary['assets']) == 416000

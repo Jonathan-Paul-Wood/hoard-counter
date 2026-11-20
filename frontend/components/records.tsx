@@ -299,7 +299,7 @@ export function useFields(resource: string): FieldSpec[] {
         type: "select",
         required: true,
         default: "Expense",
-        options: ["Expense", "Income", "Transfer", "Return"].map((v) => ({
+        options: ["Expense", "Income", "Transfer"].map((v) => ({
           value: v,
           label: v,
         })),
@@ -519,11 +519,7 @@ export function TransactionTable({
   const category = (id: string) =>
     categories.find((c: Entity) => c.id === id)?.name || "Uncategorized";
   const accountName = (t: Entity) =>
-    name(
-      t.type === "Income" || t.type === "Return"
-        ? t.destination_account_id
-        : t.source_account_id,
-    );
+    name(t.type === "Income" ? t.destination_account_id : t.source_account_id);
   const sortedItems =
     !onSort && sort
       ? [...items].sort((a, b) => {
@@ -619,7 +615,7 @@ export function TransactionTable({
               <td>
                 <span className="account-cell">
                   {name(
-                    t.type === "Income" || t.type === "Return"
+                    t.type === "Income"
                       ? t.destination_account_id
                       : t.source_account_id,
                   )}
@@ -629,7 +625,7 @@ export function TransactionTable({
                 </div>
               </td>
               <td
-                className={`number amount ${t.type === "Income" || t.type === "Return" || t.is_refund ? "positive" : ""}`}
+                className={`number amount ${t.type === "Income" || t.is_refund ? "positive" : ""}`}
               >
                 {t.type === "Expense" && !t.is_refund
                   ? "−"
@@ -760,7 +756,7 @@ export function Transactions({
             onChange={(e) => change("type", e.target.value)}
           >
             <option value="">All types</option>
-            {["Income", "Expense", "Transfer", "Return"].map((t) => (
+            {["Income", "Expense", "Transfer"].map((t) => (
               <option key={t}>{t}</option>
             ))}
           </select>

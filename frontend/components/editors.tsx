@@ -293,9 +293,6 @@ export function TransactionEditor({
       ...(name === "currency" || name === "destination_currency"
         ? { destination_amount: "" }
         : {}),
-      ...(v.type === "Return" && name === "source_account_id"
-        ? { destination_account_id: value }
-        : {}),
     }));
   const source = accounts.find(
       (a: Entity) => a.id === values.source_account_id,
@@ -303,29 +300,21 @@ export function TransactionEditor({
     dest = accounts.find((a: Entity) => a.id === values.destination_account_id);
   const transactionCurrency = values.currency || source?.currency || "USD";
   const destinationCurrency =
-    values.type === "Return"
-      ? transactionCurrency
-      : values.destination_currency || dest?.currency || "USD";
+    values.destination_currency || dest?.currency || "USD";
   const currencies = (meta.currencies || []).map((c: any) =>
     typeof c === "string" ? c : c.code,
   );
   const sourceOptions = accounts.filter((a: Entity) =>
-    values.type === "Return"
-      ? a.account_class === "asset" &&
-        (meta.investment_account_types.includes(a.type) ||
-          record?.source_account_id === a.id)
-      : values.type === "Income"
-        ? a.account_class === "income"
-        : values.type === "Expense" && values.is_refund
-          ? a.account_class === "expense"
-          : ["asset", "liability"].includes(a.account_class),
+    values.type === "Income"
+      ? a.account_class === "income"
+      : values.type === "Expense" && values.is_refund
+        ? a.account_class === "expense"
+        : ["asset", "liability"].includes(a.account_class),
   );
   const destOptions = accounts.filter((a: Entity) =>
     values.type === "Expense" && !values.is_refund
       ? a.account_class === "expense"
-      : values.type === "Return"
-        ? a.id === values.source_account_id
-        : ["asset", "liability"].includes(a.account_class),
+      : ["asset", "liability"].includes(a.account_class),
   );
   async function submit(event: React.FormEvent) {
     event.preventDefault();
@@ -335,10 +324,6 @@ export function TransactionEditor({
       const body = { ...values };
       body.currency = transactionCurrency;
       body.destination_currency = destinationCurrency;
-      if (body.type === "Return") {
-        body.destination_account_id = body.source_account_id;
-        body.destination_amount = body.amount;
-      }
       for (const key of [
         "id",
         "last_modified",
@@ -423,7 +408,7 @@ export function TransactionEditor({
       <form onSubmit={submit}>
         <fieldset disabled={!!savedId || busy} className="plain-fieldset">
           <div className="segmented">
-            {["Expense", "Income", "Transfer", "Return"].map((type) => (
+            {["Expense", "Income", "Transfer"].map((type) => (
               <button
                 key={type}
                 type="button"
@@ -449,13 +434,7 @@ export function TransactionEditor({
                 onChange={(e) => put("description", e.target.value)}
               />
             </Field>
-            <Field
-              label={
-                values.type === "Return"
-                  ? "Asset or investment account"
-                  : "From account"
-              }
-            >
+            <Field label="From account">
               <select
                 required
                 value={values.source_account_id}
@@ -472,7 +451,6 @@ export function TransactionEditor({
             <Field label="To account">
               <select
                 required
-                disabled={values.type === "Return"}
                 value={values.destination_account_id}
                 onChange={(e) => put("destination_account_id", e.target.value)}
               >
@@ -486,11 +464,7 @@ export function TransactionEditor({
             </Field>
             <Field
               label={`Amount (${transactionCurrency})`}
-              hint={
-                values.type === "Return"
-                  ? "Enter a positive gain or a negative loss."
-                  : "Enter a positive amount."
-              }
+              hint="Enter a positive amount."
             >
               <input
                 required
@@ -521,18 +495,16 @@ export function TransactionEditor({
                 ))}
               </select>
             </Field>
-            {values.type !== "Return" && (
-              <Field label="Destination currency">
-                <select
-                  value={destinationCurrency}
-                  onChange={(e) => put("destination_currency", e.target.value)}
-                >
-                  {currencies.map((currency: string) => (
-                    <option key={currency}>{currency}</option>
-                  ))}
-                </select>
-              </Field>
-            )}
+            <Field label="Destination currency">
+              <select
+                value={destinationCurrency}
+                onChange={(e) => put("destination_currency", e.target.value)}
+              >
+                {currencies.map((currency: string) => (
+                  <option key={currency}>{currency}</option>
+                ))}
+              </select>
+            </Field>
             {source && dest && transactionCurrency !== destinationCurrency && (
               <Field
                 label={`Received amount (${destinationCurrency})`}
@@ -817,7 +789,7 @@ export function RuleEditor({
     if (field === "tag_ids")
       return tags.map((a: Entity) => ({ value: a.id, label: a.name }));
     if (field === "type")
-      return ["Income", "Expense", "Transfer", "Return"].map((value) => ({
+      return ["Income", "Expense", "Transfer"].map((value) => ({
         value,
         label: value,
       }));

@@ -123,9 +123,9 @@ export function Dashboard() {
                 icon={<ArrowUpRight size={20} />}
               />
               <Stat
-                label="Investment returns"
-                value={money(data.returns)}
-                hint="Investment gains and losses"
+                label="Net cash flow"
+                value={money(data.net)}
+                hint="Income less expenses"
                 icon={<TrendingUp size={20} />}
               />
             </div>
@@ -1197,8 +1197,8 @@ function PerformanceCalculation({ data }: { data: any }) {
       <p>
         Contributions are positive and withdrawals are negative. Cash flows
         after the opening valuation through the closing valuation are included.
-        Return transactions and investment fees stay in performance; opening
-        principal and balance corrections count as external cash flows.
+        Valuation gains, losses, and investment fees stay in performance;
+        opening principal and balance corrections count as external cash flows.
       </p>
       <h4>1. Calculate each valuation period</h4>
       <p>
@@ -1500,7 +1500,7 @@ export function Reports() {
                 onChange={(e) => change("type", e.target.value)}
               >
                 <option value="">All types</option>
-                {["Income", "Expense", "Transfer", "Return"].map((t) => (
+                {["Income", "Expense", "Transfer"].map((t) => (
                   <option key={t}>{t}</option>
                 ))}
               </select>
@@ -1565,7 +1565,7 @@ export function Reports() {
       ) : (
         report.data && (
           <>
-            <div className="stats four">
+            <div className="stats three">
               <Stat
                 label="Income"
                 value={money(report.data.summary?.income)}
@@ -1574,10 +1574,6 @@ export function Reports() {
               <Stat
                 label="Expenses"
                 value={money(report.data.summary?.expenses)}
-              />
-              <Stat
-                label="Returns"
-                value={money(report.data.summary?.returns)}
               />
               <Stat
                 label="Net cash flow"

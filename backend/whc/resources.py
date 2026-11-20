@@ -36,7 +36,7 @@ def sort_records(records, kind, field, direction):
         if field == 'account_id':
             return accounts.get(row.get('account_id'), row.get('account_id', '')).casefold()
         if field == 'account':
-            account_id = row.get('destination_account_id') if row['type'] in ('Income', 'Return') else row.get('source_account_id')
+            account_id = row.get('destination_account_id') if row['type'] == 'Income' else row.get('source_account_id')
             return accounts.get(account_id, '—').casefold()
         if field == 'category':
             return categories.get(row.get('category_id'), 'Uncategorized').casefold()

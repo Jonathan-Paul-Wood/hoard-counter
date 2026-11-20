@@ -175,7 +175,7 @@ def build_pdf(report):
         story.extend([Spacer(1, 10), KeepTogether([p('Spending by category', 'Heading2'), chart])])
         story.append(table([['Category', 'Net spending']] + [[r['name'], dollars(r['amount'])] for r in categories], [380, 152]))
     if report['monthly_trend']:
-        story.extend([Spacer(1, 12), p('Monthly cash flow', 'Heading2'), table([['Month', 'Income', 'Spending', 'Returns', 'Net']] + [[r['month']] + [dollars(r[k]) for k in ('income', 'expenses', 'returns', 'net')] for r in report['monthly_trend']], [92, 110, 110, 110, 110])])
+        story.extend([Spacer(1, 12), p('Monthly cash flow', 'Heading2'), table([['Month', 'Income', 'Spending', 'Net']] + [[r['month']] + [dollars(r[k]) for k in ('income', 'expenses', 'net')] for r in report['monthly_trend']], [112, 140, 140, 140])])
     trend = report.get('net_worth_trend', [])
     if len(trend) > 1:
         chart = Drawing(532, 180)
