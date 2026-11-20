@@ -1009,6 +1009,33 @@
               "default": false
             },
             "description": "Include opening, valuation, and reconciliation journals."
+          },
+          {
+            "name": "sort_by",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "description",
+                "date",
+                "category",
+                "account",
+                "amount"
+              ]
+            },
+            "description": "Sort all matching records before pagination. Account and category columns use their displayed names; amounts use signed native-currency values."
+          },
+          {
+            "name": "sort_direction",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "asc"
+            }
           }
         ]
       },
@@ -6290,6 +6317,31 @@
             "in": "query",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "sort_by",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "account_id",
+                "date",
+                "amount"
+              ]
+            },
+            "description": "Sort all matching records before pagination. Account and category columns use their displayed names; amounts use signed native-currency values."
+          },
+          {
+            "name": "sort_direction",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "asc"
             }
           }
         ]

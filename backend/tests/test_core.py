@@ -39,6 +39,40 @@ def assert_balanced():
         assert sum((Decimal(p.usd_amount) for p in postings), Decimal(0)) == 0
 
 
+def test_table_sorting_before_pagination_and_by_displayed_names(app):
+    client = app.test_client()
+    assert client.post('/api/v1/auth/setup', json={'username': 'owner', 'password': 'correct-horse-battery'}).status_code == 201
+    alpha = account('Alpha')
+    zulu = account('Zulu')
+    food = save_record('category', {'name': 'Food'}, None)
+    income = transaction(system_id('income'), zulu.id, '2', typ='Income')
+    expense = transaction(alpha.id, system_id('expense'), '10', typ='Expense', category_id=food.id)
+    transfer = transaction(zulu.id, alpha.id, '100', when='2025-01-06')
+    db.session.commit()
+
+    def ids(resource, **params):
+        response = client.get('/api/v1/' + resource, query_string=params)
+        assert response.status_code == 200
+        return [r['id'] for r in response.json['items']]
+
+    assert ids('transactions', sort_by='amount', page_size=1, page=1) == [expense.id]
+    assert ids('transactions', sort_by='amount', page_size=1, page=2) == [income.id]
+    assert ids('transactions', sort_by='amount', sort_direction='desc') == [transfer.id, income.id, expense.id]
+    assert ids('transactions', sort_by='account', page_size=1) == [expense.id]
+    assert ids('transactions', sort_by='category', page_size=1) == [expense.id]
+    assert ids('transactions', sort_by='date', sort_direction='desc', page_size=1) == [transfer.id]
+    assert ids('transactions', sort_by='amount', type='Income') == [income.id]
+
+    first = save_record('valuation', {'account_id': zulu.id, 'date': '2025-01-01', 'amount': '2'}, None)
+    second = save_record('valuation', {'account_id': alpha.id, 'date': '2025-01-02', 'amount': '10'}, None)
+    db.session.commit()
+    assert ids('valuations', sort_by='account_id') == [second.id, first.id]
+    assert ids('valuations', sort_by='amount') == [first.id, second.id]
+    assert ids('valuations', sort_by='date', sort_direction='desc') == [second.id, first.id]
+    for params in ({'sort_by': 'invalid'}, {'sort_by': 'date', 'sort_direction': 'invalid'}):
+        assert client.get('/api/v1/transactions', query_string=params).status_code == 400
+
+
 @pytest.mark.parametrize("typ", INVESTMENT_TYPES)
 @pytest.mark.parametrize("amount", ["5", "-5", "0"])
 def test_returns_are_rejected(app, typ, amount):
