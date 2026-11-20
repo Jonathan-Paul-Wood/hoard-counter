@@ -22,9 +22,13 @@ def occurrences(subscription_data, start, end):
         while current <= end:
             if current >= start:
                 result.append(current)
+            if len(result) > 10000:
+                raise ApiError("The recurrence range is too large")
+            if (end - current).days < step:
+                break
             current += timedelta(days=step)
     else:
-        step = interval * (12 if frequency == "yearly" else 1)
+        step = interval * {"yearly": 12, "annually": 12, "quarterly": 3}.get(frequency, 1)
         month_distance = (start.year - anchor.year) * 12 + start.month - anchor.month
         n = max(0, month_distance // step)
         while True:
@@ -38,6 +42,8 @@ def occurrences(subscription_data, start, end):
                 break
             if current >= start:
                 result.append(current)
+            if len(result) > 10000:
+                raise ApiError("The recurrence range is too large")
             n += 1
     if len(result) > 10000:
         raise ApiError("The recurrence range is too large")

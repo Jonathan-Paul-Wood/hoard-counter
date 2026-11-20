@@ -628,6 +628,18 @@
                     "type": "string",
                     "maxLength": 10000
                   },
+                  "closed_on": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "date"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "Closing date, inclusive. Null means open. Closing requires zero net balance and no later activity; historical reports retain this account."
+                  },
                   "opening_currency": {
                     "type": "string",
                     "description": "Currency of the opening amount; preserved when existing currencies are kept."
@@ -5220,10 +5232,6 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "month": {
-                    "type": "string",
-                    "pattern": "^\\d{4}-\\d{2}$"
-                  },
                   "category_id": {
                     "type": "string",
                     "format": "uuid"
@@ -5232,6 +5240,34 @@
                     "type": "string",
                     "pattern": "^-?\\d+(\\.\\d+)?$",
                     "description": "Exact decimal string. Never send a JSON floating-point number."
+                  },
+                  "start_date": {
+                    "type": "string",
+                    "format": "date"
+                  },
+                  "end_date": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "format": "date"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "period": {
+                    "type": "string",
+                    "enum": [
+                      "day",
+                      "week",
+                      "month",
+                      "year"
+                    ]
+                  },
+                  "frequency": {
+                    "type": "integer",
+                    "minimum": 1
                   },
                   "revision": {
                     "type": "integer"
@@ -9175,6 +9211,15 @@
         },
         "parameters": [
           {
+            "name": "as_of",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          },
+          {
             "name": "month",
             "in": "query",
             "required": false,
@@ -10647,9 +10692,9 @@
         }
       }
     },
-    "/budgets/copy": {
+    "/budget-projections": {
       "post": {
-        "summary": "budgets/copy",
+        "summary": "budget-projections",
         "responses": {
           "200": {
             "description": "Success",
@@ -10759,16 +10804,21 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "source_month": {
-                    "type": "string"
+                  "date": {
+                    "type": "string",
+                    "format": "date"
                   },
-                  "target_month": {
-                    "type": "string"
+                  "budget_ids": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "format": "uuid"
+                    }
                   }
                 },
                 "required": [
-                  "source_month",
-                  "target_month"
+                  "date",
+                  "budget_ids"
                 ]
               }
             }
@@ -12403,6 +12453,135 @@
         ]
       }
     },
+    "/budgets/{id}/projection": {
+      "parameters": [
+        {
+          "name": "id",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      ],
+      "get": {
+        "summary": "Project category allowance",
+        "responses": {
+          "200": {
+            "description": "Success",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid input",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Sign in required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Not authorized or CSRF check failed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Record not found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Revision or import conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "Request body exceeds upload limit",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Required exchange rate missing",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "428": {
+            "description": "Editing revision is required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Maintenance or database unavailable",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "name": "date",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "date"
+            }
+          }
+        ]
+      }
+    },
     "/subscriptions/{id}/occurrences": {
       "parameters": [
         {
@@ -12867,6 +13046,18 @@
           "description": {
             "type": "string",
             "maxLength": 10000
+          },
+          "closed_on": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Closing date, inclusive. Null means open. Closing requires zero net balance and no later activity; historical reports retain this account."
           },
           "opening_currency": {
             "type": "string",
@@ -13370,10 +13561,6 @@
           "deleted": {
             "type": "boolean"
           },
-          "month": {
-            "type": "string",
-            "pattern": "^\\d{4}-\\d{2}$"
-          },
           "category_id": {
             "type": "string",
             "format": "uuid"
@@ -13382,15 +13569,45 @@
             "type": "string",
             "pattern": "^-?\\d+(\\.\\d+)?$",
             "description": "Exact decimal string. Never send a JSON floating-point number."
+          },
+          "start_date": {
+            "type": "string",
+            "format": "date"
+          },
+          "end_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "period": {
+            "type": "string",
+            "enum": [
+              "day",
+              "week",
+              "month",
+              "year"
+            ]
+          },
+          "frequency": {
+            "type": "integer",
+            "minimum": 1
           }
         },
         "required": [
           "id",
           "revision",
           "last_modified",
-          "month",
           "category_id",
-          "amount"
+          "amount",
+          "start_date",
+          "period",
+          "frequency"
         ]
       },
       "Rate": {
@@ -14519,6 +14736,18 @@
             "type": "string",
             "maxLength": 10000
           },
+          "closed_on": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Closing date, inclusive. Null means open. Closing requires zero net balance and no later activity; historical reports retain this account."
+          },
           "opening_currency": {
             "type": "string",
             "description": "Currency of the opening amount; preserved when existing currencies are kept."
@@ -14825,10 +15054,6 @@
       "BudgetInput": {
         "type": "object",
         "properties": {
-          "month": {
-            "type": "string",
-            "pattern": "^\\d{4}-\\d{2}$"
-          },
           "category_id": {
             "type": "string",
             "format": "uuid"
@@ -14837,12 +15062,42 @@
             "type": "string",
             "pattern": "^-?\\d+(\\.\\d+)?$",
             "description": "Exact decimal string. Never send a JSON floating-point number."
+          },
+          "start_date": {
+            "type": "string",
+            "format": "date"
+          },
+          "end_date": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "period": {
+            "type": "string",
+            "enum": [
+              "day",
+              "week",
+              "month",
+              "year"
+            ]
+          },
+          "frequency": {
+            "type": "integer",
+            "minimum": 1
           }
         },
         "required": [
-          "month",
           "category_id",
-          "amount"
+          "amount",
+          "start_date",
+          "period",
+          "frequency"
         ]
       },
       "RateInput": {

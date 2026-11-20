@@ -126,6 +126,22 @@ def has_ledger_history(history):
     return any(r.data.get("system") != "opening" or decimal(r.data.get("amount", "0")) != 0 for r in history)
 
 
+def validate_account_date(account, when):
+    closed_on = account.data.get("closed_on")
+    if closed_on and when > closed_on:
+        raise ApiError(f"{account.data['name']} was closed on {closed_on}; choose a date on or before closing", 409, "account_closed")
+
+
+def validate_account_closure(account):
+    closed_on = account.data.get("closed_on")
+    if not closed_on or account.deleted:
+        return
+    if any(not row.deleted and row.data.get("date", "") > closed_on for row in account_history(account.id)):
+        raise ApiError("The closing date must be on or after all existing account activity", 409, "account_activity_after_closure")
+    if account_balance(account.id) != 0:
+        raise ApiError("An account must have a net balance of zero to be closed", 409, "account_balance_not_zero")
+
+
 def _validate_account(data, existing, preserve_snapshots=False):
     required_text(data, "name", 160)
     description = data.get("description")
@@ -151,6 +167,9 @@ def _validate_account(data, existing, preserve_snapshots=False):
     if inferred == "liability" and decimal(data["opening_balance"]) > 0:
         data["opening_balance"] = money(-decimal(data["opening_balance"]))
     data["opening_date"] = date_string(data.get("opening_date", date.today().isoformat()), "opening_date")
+    data["closed_on"] = date_string(data["closed_on"], "closed_on") if data.get("closed_on") is not None else None
+    if data["closed_on"] and data["closed_on"] < data["opening_date"]:
+        raise ApiError("The closing date cannot be before the opening date")
     changed = not existing or data["opening_date"] != existing.data.get("opening_date") or data["opening_currency"] != existing.data.get("opening_currency", existing.data["currency"]) or (existing and not decimal(existing.data.get("opening_balance", "0")) and decimal(data["opening_balance"]))
     if changed and not preserve_snapshots:
         data.pop("opening_posting_snapshots", None)
@@ -174,6 +193,13 @@ def _validate_transaction(data, existing=None, preserve_snapshots=False, histori
         raise ApiError("Source and destination must be different accounts")
     required_text(data, "description", 1000)
     data["date"] = date_string(data.get("date"))
+    if not historical:
+        for account in (source, destination):
+            opening_date = account.data.get("opening_date")
+            if opening_date and data["date"] < opening_date:
+                raise ApiError(f"{account.data['name']} opened on {opening_date}; choose a date on or after opening", 409, "account_not_open")
+        validate_account_date(source, data["date"])
+        validate_account_date(destination, data["date"])
     sclass, dclass = source.data["account_class"], destination.data["account_class"]
     financial = {"asset", "liability"}
     valid = {"Income": sclass == "income" and dclass in financial,
@@ -220,6 +246,21 @@ def _validate_transaction(data, existing=None, preserve_snapshots=False, histori
     return source, destination
 
 
+def _validate_archived_transaction(data, existing):
+    account_ids = {data["source_account_id"], data["destination_account_id"]}
+    if existing:
+        account_ids.update(existing.data[field] for field in ("source_account_id", "destination_account_id"))
+    if not any(get_record("account", account_id, True).data.get("closed_on") for account_id in account_ids):
+        return
+    if not existing or existing.deleted:
+        raise ApiError("New transactions cannot be added to archived accounts", 409, "account_archived")
+    fields = ("type", "date", "source_account_id", "destination_account_id", "currency", "destination_currency")
+    amounts = ("amount", "destination_amount", "fx_rate", "destination_fx_rate")
+    if (any(data.get(field) != existing.data.get(field) for field in fields)
+            or any(decimal(data[field]) != decimal(existing.data[field]) for field in amounts)):
+        raise ApiError("The accounts, date, amounts, and currencies of transactions in archived accounts cannot be changed", 409, "account_archived")
+
+
 def _validate(kind, data, existing, preserve_snapshots=False, historical=False):
     if kind == "account":
         _validate_account(data, existing, preserve_snapshots)
@@ -246,14 +287,25 @@ def _validate(kind, data, existing, preserve_snapshots=False, historical=False):
         if not historical and any(r.id != (existing.id if existing else None) and r.data["currency"] == data["currency"] and r.data["date"] == data["date"] for r in list_records("rate")):
             raise ApiError("A rate already exists for this currency and date", 409)
     elif kind == "budget":
-        month = data.get("month", "")
-        date_string(month + "-01", "month")
+        data["start_date"] = date_string(data.get("start_date"), "start_date")
+        data["end_date"] = date_string(data["end_date"], "end_date") if data.get("end_date") else None
+        if data["end_date"] and data["end_date"] < data["start_date"]:
+            raise ApiError("Budget end precedes its start")
+        if data.get("period") not in ("day", "week", "month", "year"):
+            raise ApiError("Budget period must be day, week, month, or year")
+        frequency = data.get("frequency")
+        if isinstance(frequency, bool) or not isinstance(frequency, int) or frequency < 1:
+            raise ApiError("Budget frequency must be a positive integer")
         _reference(data, "category_id", "category", True, historical)
+        if not historical:
+            for other in list_records("budget"):
+                if other.id == (existing.id if existing else None) or other.data["category_id"] != data["category_id"]:
+                    continue
+                if data["start_date"] <= (other.data.get("end_date") or "9999-12-31") and other.data["start_date"] <= (data["end_date"] or "9999-12-31"):
+                    raise ApiError("This category already has a budget active during these dates", 409, "budget_overlap")
         data["amount"] = amount(data.get("amount"), "USD")
         if decimal(data["amount"]) < 0:
             raise ApiError("Budget amount cannot be negative")
-        if not historical and any(r.id != (existing.id if existing else None) and r.data.get("month") == month and r.data.get("category_id") == data["category_id"] for r in list_records("budget")):
-            raise ApiError("This category already has a budget for that month", 409)
     elif kind == "subscription":
         required_text(data, "name", 160)
         data["type"] = data.get("type", "Expense")
@@ -285,6 +337,8 @@ def _validate(kind, data, existing, preserve_snapshots=False, historical=False):
         if account.data["account_class"] != "asset":
             raise ApiError("Market valuations apply to asset accounts")
         data["date"] = date_string(data.get("date"))
+        if not historical:
+            validate_account_date(account, data["date"])
         data["currency"] = currency_code(data.get("currency") or account.data["currency"])
         data["amount"] = amount(data.get("amount"), data["currency"])
         if decimal(data["amount"]) < 0:
@@ -583,6 +637,9 @@ def save_record(kind, data, actor, record_id=None, expected_revision=None, origi
         if not existing and apply_rules:
             merged = apply_transaction_rules(merged)
             _validate_transaction(merged, existing, preserve_snapshots, historical)
+        # Full archives restore closed accounts before their historical transactions.
+        if not historical and not (origin == "import" and not apply_rules):
+            _validate_archived_transaction(merged, existing)
         if not explicit_unlink and not incoming.get("deleted") and (apply_rules or merged.get("subscription_id")) and (not existing or any(merged.get(k) != existing.data.get(k) for k in ("subscription_id", "subscription_date", "amount", "date", "source_account_id", "destination_account_id"))):
             _link_subscription(merged, rid)
     record = existing or Record(id=rid or new_id(), kind=kind)
@@ -621,6 +678,10 @@ def save_record(kind, data, actor, record_id=None, expected_revision=None, origi
             affected.add(before["account_id"])
     for account_id in affected:
         rebuild_account_valuations(account_id, actor)
+    # Archive imports restore accounts before their transactions; check the
+    # completed ledger in apply_import instead of the partially restored balance.
+    if kind == "account" and origin != "import":
+        validate_account_closure(record)
     add_audit(kind, record.id, "create" if existing is None else "update", actor, origin, before, record.to_dict())
     db.session.flush()
     return record
@@ -734,6 +795,7 @@ def reconcile_account(account_id, balance, when, actor, expected_revision):
     if int(expected_revision or 0) != account.revision:
         raise ApiError("This account has changed", 409, "revision_conflict")
     when = date_string(when)
+    validate_account_date(account, when)
     target = decimal(amount(balance, account.data["currency"], "balance"))
     if account.data["account_class"] == "liability":
         target = -target

@@ -304,14 +304,35 @@ export function TransactionEditor({
   const currencies = (meta.currencies || []).map((c: any) =>
     typeof c === "string" ? c : c.code,
   );
-  const sourceOptions = accounts.filter((a: Entity) =>
+  const financialLocked =
+    !!record &&
+    accounts.some(
+      (a: Entity) =>
+        a.closed_on &&
+        [record.source_account_id, record.destination_account_id].includes(
+          a.id,
+        ),
+    );
+  const openingDate = [source?.opening_date, dest?.opening_date]
+    .filter(Boolean)
+    .sort()
+    .at(-1);
+  const eligibleAccounts = accounts.filter(
+    (a: Entity) =>
+      !a.closed_on ||
+      (financialLocked &&
+        [record?.source_account_id, record?.destination_account_id].includes(
+          a.id,
+        )),
+  );
+  const sourceOptions = eligibleAccounts.filter((a: Entity) =>
     values.type === "Income"
       ? a.account_class === "income"
       : values.type === "Expense" && values.is_refund
         ? a.account_class === "expense"
         : ["asset", "liability"].includes(a.account_class),
   );
-  const destOptions = accounts.filter((a: Entity) =>
+  const destOptions = eligibleAccounts.filter((a: Entity) =>
     values.type === "Expense" && !values.is_refund
       ? a.account_class === "expense"
       : ["asset", "liability"].includes(a.account_class),
@@ -345,6 +366,21 @@ export function TransactionEditor({
           ? body.amount
           : body.destination_amount || null;
       delete body.fee_amount;
+      if (financialLocked) {
+        for (const key of [
+          "type",
+          "date",
+          "source_account_id",
+          "destination_account_id",
+          "amount",
+          "destination_amount",
+          "currency",
+          "destination_currency",
+          "destination_usd_amount",
+          "is_refund",
+        ])
+          delete body[key];
+      }
       if (record) body.revision = record.revision;
       let id = savedId;
       if (!id) {
@@ -407,11 +443,19 @@ export function TransactionEditor({
     >
       <form onSubmit={submit}>
         <fieldset disabled={!!savedId || busy} className="plain-fieldset">
+          {financialLocked && (
+            <div className="warning div">
+              This transaction belongs to an archived account. Its accounts,
+              date, amounts, and currencies are locked; other details can be
+              edited.
+            </div>
+          )}
           <div className="segmented">
             {["Expense", "Income", "Transfer"].map((type) => (
               <button
                 key={type}
                 type="button"
+                disabled={financialLocked}
                 className={values.type === type ? "active" : ""}
                 onClick={() => {
                   put("type", type);
@@ -438,6 +482,7 @@ export function TransactionEditor({
               <select
                 required
                 value={values.source_account_id}
+                disabled={financialLocked}
                 onChange={(e) => put("source_account_id", e.target.value)}
               >
                 <option value="">Select source…</option>
@@ -451,6 +496,7 @@ export function TransactionEditor({
             <Field label="To account">
               <select
                 required
+                disabled={financialLocked}
                 value={values.destination_account_id}
                 onChange={(e) => put("destination_account_id", e.target.value)}
               >
@@ -471,6 +517,7 @@ export function TransactionEditor({
                 inputMode="decimal"
                 placeholder="0.00"
                 value={values.amount}
+                disabled={financialLocked}
                 onChange={(e) => put("amount", e.target.value)}
               />
             </Field>
@@ -479,6 +526,8 @@ export function TransactionEditor({
                 required
                 type="date"
                 value={values.date}
+                disabled={financialLocked}
+                min={openingDate}
                 onChange={(e) => put("date", e.target.value)}
               />
             </Field>
@@ -488,6 +537,7 @@ export function TransactionEditor({
             >
               <select
                 value={transactionCurrency}
+                disabled={financialLocked}
                 onChange={(e) => put("currency", e.target.value)}
               >
                 {currencies.map((currency: string) => (
@@ -498,6 +548,7 @@ export function TransactionEditor({
             <Field label="Destination currency">
               <select
                 value={destinationCurrency}
+                disabled={financialLocked}
                 onChange={(e) => put("destination_currency", e.target.value)}
               >
                 {currencies.map((currency: string) => (
@@ -513,6 +564,7 @@ export function TransactionEditor({
                 <input
                   inputMode="decimal"
                   value={values.destination_amount}
+                  disabled={financialLocked}
                   onChange={(e) => put("destination_amount", e.target.value)}
                 />
               </Field>
@@ -602,6 +654,7 @@ export function TransactionEditor({
                   <input
                     type="checkbox"
                     checked={values.is_refund}
+                    disabled={financialLocked}
                     onChange={(e) => {
                       put("is_refund", e.target.checked);
                       put("source_account_id", "");

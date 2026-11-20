@@ -22,6 +22,7 @@ import {
   CreditCard,
   Scale,
   Plus,
+  Archive,
 } from "lucide-react";
 import {
   api,
@@ -244,13 +245,6 @@ export function useFields(resource: string): FieldSpec[] {
     ],
     budgets: [
       {
-        name: "month",
-        label: "Month",
-        type: "month",
-        required: true,
-        default: monthNow(),
-      },
-      {
         name: "category_id",
         label: "Category",
         type: "select",
@@ -259,10 +253,45 @@ export function useFields(resource: string): FieldSpec[] {
       },
       {
         name: "amount",
-        label: "Monthly target (USD)",
+        label: "Amount per occurrence (USD)",
         type: "decimal",
         required: true,
-        wide: true,
+      },
+      {
+        name: "start_date",
+        label: "Start date",
+        type: "date",
+        required: true,
+        default: today(),
+        hint: "The first credit occurs on this date.",
+      },
+      {
+        name: "end_date",
+        label: "End date",
+        type: "date",
+        hint: "Inclusive. Leave blank to continue indefinitely.",
+      },
+      {
+        name: "frequency",
+        label: "Repeat every",
+        type: "integer",
+        required: true,
+        default: 1,
+        min: "1",
+        step: "1",
+      },
+      {
+        name: "period",
+        label: "Period",
+        type: "select",
+        required: true,
+        default: "month",
+        options: [
+          { value: "day", label: "Days" },
+          { value: "week", label: "Weeks" },
+          { value: "month", label: "Months" },
+          { value: "year", label: "Years" },
+        ],
       },
     ],
     users: [
@@ -436,9 +465,11 @@ export function DeleteDialog({
       <p className="dialog-copy">
         {resource === "transactions"
           ? "This removes the transaction from active balances and reports. Its original values remain in the audit history."
-          : resource === "accounts"
-            ? `Remove “${record.name}” from active accounts? Only unused accounts with a zero opening balance can be removed. Audit history is retained; linked records must be unlinked first.`
-            : `Remove “${record.name || record.description || record.date || "this record"}”? Records in use may need to be unlinked first.`}
+          : resource === "budgets"
+            ? "Deleting this budget removes all of its credits and recalculates the category allowance. To preserve past credits, edit the budget's end date instead."
+            : resource === "accounts"
+              ? `Remove “${record.name}” from active accounts? Only unused accounts with a zero opening balance can be removed. Audit history is retained; linked records must be unlinked first.`
+              : `Remove “${record.name || record.description || record.date || "this record"}”? Records in use may need to be unlinked first.`}
       </p>
       <ErrorBox error={error} />
       <div className="modal-footer">
@@ -625,11 +656,11 @@ export function TransactionTable({
                 </div>
               </td>
               <td
-                className={`number amount ${t.type === "Income" || t.is_refund ? "positive" : ""}`}
+                className={`number amount ${Number(t.amount) < 0 || (t.type === "Expense" && !t.is_refund) ? "negative" : t.type === "Income" || t.is_refund ? "positive" : ""}`}
               >
                 {t.type === "Expense" && !t.is_refund
                   ? "−"
-                  : t.type === "Transfer"
+                  : t.type === "Transfer" || Number(t.amount) < 0
                     ? ""
                     : "+"}
                 {money(
@@ -888,11 +919,79 @@ export function Transactions({
   );
 }
 
+function CloseAccountDialog({
+  account,
+  onClose,
+  onSaved,
+}: {
+  account: Entity;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const { notify, refresh } = useApp();
+  const [closedOn, setClosedOn] = useState(today());
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  async function closeAccount(event: React.FormEvent) {
+    event.preventDefault();
+    setBusy(true);
+    setError("");
+    try {
+      await api(`/accounts/${account.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          closed_on: closedOn,
+          revision: account.revision,
+        }),
+      });
+      notify("Account closed. History remains available in reports.");
+      refresh();
+      onSaved();
+      onClose();
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Modal title={`Close ${account.name}`} onClose={onClose}>
+      <form onSubmit={closeAccount}>
+        <p className="dialog-copy">
+          The net balance must be zero, with no activity after the closing date.
+          Transactions dated on or before this date remain available, including
+          in reports. Use Show archived in Accounts to find closed accounts.
+        </p>
+        <Field label="Closed on">
+          <input
+            type="date"
+            required
+            min={account.opening_date}
+            value={closedOn}
+            onChange={(e) => setClosedOn(e.target.value)}
+          />
+        </Field>
+        <ErrorBox error={error} />
+        <div className="modal-footer">
+          <Button type="button" variant="secondary" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button type="submit" busy={busy}>
+            Close account
+          </Button>
+        </div>
+      </form>
+    </Modal>
+  );
+}
+
 export function Accounts() {
   const { accounts, version } = useApp();
   const fields = useFields("accounts");
   const [editor, setEditor] = useState<Entity | null | undefined>();
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [closing, setClosing] = useState<Entity | null>(null);
+  const [showArchived, setShowArchived] = useState(false);
   const [reconcile, setReconcile] = useState<Entity | null>(null);
   const [removed, setRemoved] = useState<Entity | null>(null);
   const [group, setGroup] = useState("owned");
@@ -904,7 +1003,8 @@ export function Accounts() {
     version,
   );
   const selected = accounts.find((a: Entity) => a.id === selectedId);
-  const owned = accounts.filter(
+  const visible = accounts.filter((a: Entity) => showArchived || !a.closed_on);
+  const owned = visible.filter(
     (a: Entity) =>
       ["asset", "liability"].includes(a.account_class) &&
       (!typeFilter || a.type === typeFilter) &&
@@ -922,7 +1022,7 @@ export function Accounts() {
         .filter((a: Entity) => a.account_class === "liability")
         .map((a: Entity) => a.balance_usd),
     );
-  const shown = accounts.filter(
+  const shown = visible.filter(
     (a: Entity) =>
       (group === "owned"
         ? ["asset", "liability"].includes(a.account_class)
@@ -953,6 +1053,15 @@ export function Accounts() {
                     <Pencil size={15} />
                     Edit account
                   </Button>
+                  {!selected.closed_on && (
+                    <Button
+                      variant="secondary"
+                      onClick={() => setClosing(selected)}
+                    >
+                      <Archive size={16} />
+                      Close account
+                    </Button>
+                  )}
                   <Button onClick={() => setReconcile(selected)}>
                     <Scale size={16} />
                     Reconcile
@@ -961,6 +1070,12 @@ export function Accounts() {
               )
             }
           />
+          {selected.closed_on && (
+            <p className="notice">
+              Closed on {prettyDate(selected.closed_on)}. Historical activity is
+              retained in reports.
+            </p>
+          )}
           {selected.description && (
             <p style={{ whiteSpace: "pre-wrap" }}>{selected.description}</p>
           )}
@@ -1051,6 +1166,14 @@ export function Accounts() {
             />
           </div>
           <div className="section-header">
+            <Button
+              variant="secondary"
+              aria-pressed={showArchived}
+              onClick={() => setShowArchived(!showArchived)}
+            >
+              <Archive size={16} />
+              {showArchived ? "Hide archived" : "Show archived"}
+            </Button>
             <div className="tabs">
               <button
                 className={group === "owned" ? "active" : ""}
@@ -1085,7 +1208,7 @@ export function Accounts() {
               <option value="">All account types</option>
               {Array.from(
                 new Set<string>(
-                  accounts
+                  visible
                     .filter((a: Entity) =>
                       group === "owned"
                         ? ["asset", "liability"].includes(a.account_class)
@@ -1132,6 +1255,16 @@ export function Accounts() {
                           >
                             <Trash2 size={15} />
                           </button>
+                          {!a.closed_on && (
+                            <button
+                              className="icon-button"
+                              title="Close account"
+                              aria-label={`Close ${a.name}`}
+                              onClick={() => setClosing(a)}
+                            >
+                              <Archive size={15} />
+                            </button>
+                          )}
                         </>
                       )}
                     </div>
@@ -1144,6 +1277,9 @@ export function Accounts() {
                     <ArrowUpRight size={17} />
                   </button>
                   <p>
+                    {a.closed_on
+                      ? `Closed on ${prettyDate(a.closed_on)} · `
+                      : ""}
                     {a.type}{" "}
                     {a.account_class === "liability" ? "· Amount owed" : ""}
                     {a.account_number ? ` · ${a.account_number}` : ""}
@@ -1190,6 +1326,13 @@ export function Accounts() {
           onClose={() => setEditor(undefined)}
         />
       )}{" "}
+      {closing && (
+        <CloseAccountDialog
+          account={closing}
+          onClose={() => setClosing(null)}
+          onSaved={() => setSelectedId(null)}
+        />
+      )}
       {reconcile && (
         <ReconcileEditor
           account={reconcile}
