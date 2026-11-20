@@ -39,6 +39,20 @@ def assert_balanced():
         assert sum((Decimal(p.usd_amount) for p in postings), Decimal(0)) == 0
 
 
+@pytest.mark.parametrize("typ", INVESTMENT_TYPES)
+@pytest.mark.parametrize("amount", ["5", "-5", "0"])
+def test_returns_are_rejected(app, typ, amount):
+    investment = account(typ=typ)
+    with pytest.raises(ApiError, match="Choose Income, Expense, or Transfer"):
+        transaction(investment.id, investment.id, amount, typ="Return")
+    checking = account("Contribution source")
+    with pytest.raises(ApiError, match="Unsupported subscription transaction type"):
+        save_record("subscription", {"name": "Unsupported Return", "type": "Return",
+            "source_account_id": investment.id, "destination_account_id": checking.id,
+            "amount": "5", "start_date": "2025-01-01"}, None)
+    assert account_balance(investment.id) == Decimal("100")
+
+
 def test_remove_unused_account_voids_zero_opening(app):
     unused = account(opening="0")
     opening = get_record("transaction", system_id("journal/opening/" + unused.id))
@@ -170,16 +184,6 @@ def test_legacy_account_import_remains_idempotent(app):
     assert classify("account", legacy)[0] == "skip"
 
 
-def test_existing_return_remains_editable_after_account_type_change(app):
-    investment = account(typ="Brokerage")
-    gain = transaction(investment.id, investment.id, "5", typ="Return")
-    save_record("account", {"type": "Checking"}, None, investment.id, investment.revision)
-    save_record("transaction", {"notes": "Historical investment gain"}, None, gain.id, gain.revision)
-    assert account_balance(investment.id) == Decimal("105")
-    with pytest.raises(ApiError, match="same investment account"):
-        transaction(investment.id, investment.id, "5", typ="Return")
-
-
 @pytest.mark.parametrize("choice,expected", [("keep", "45"), ("relabel", "90")])
 def test_reconciliation_retains_or_relabels_currency(app, choice, expected):
     from whc.ledger import reconcile_account
@@ -250,46 +254,13 @@ def test_fx_exact_precision_and_snapshots(app):
 def test_absolute_valuations_replay_after_retroactive_contribution(app):
     investment = account("Brokerage", "100", typ="Brokerage")
     checking = account()
-    transaction(investment.id, investment.id, "5", "2025-01-10", "Return")
     valuation = save_record("valuation", {"account_id": investment.id, "date": "2025-01-31", "amount": "110"}, None)
     adjustment = get_record("transaction", system_id("journal/valuation/" + valuation.id))
-    assert Decimal(adjustment.data["amount"]) == Decimal("5")
+    assert Decimal(adjustment.data["amount"]) == Decimal("10")
     transaction(checking.id, investment.id, "20", "2025-01-15")
-    assert Decimal(adjustment.data["amount"]) == Decimal("-15")
+    assert Decimal(adjustment.data["amount"]) == Decimal("-10")
     assert account_balance(investment.id) == Decimal("110")
     assert_balanced()
-
-
-@pytest.mark.parametrize("typ", INVESTMENT_TYPES)
-def test_signed_returns_change_investment_balance_once(app, typ):
-    investment = account("Investment", typ=typ)
-    gain = transaction(investment.id, investment.id, "15", typ="Return")
-    loss = transaction(investment.id, investment.id, "-7.50", typ="Return")
-    assert account_balance(investment.id) == Decimal("107.50")
-    assert Decimal(loss.data["destination_amount"]) == Decimal("-7.50")
-    save_record("transaction", {"amount": "-20"}, None, gain.id, gain.revision)
-    assert account_balance(investment.id) == Decimal("72.50")
-    void_record("transaction", loss.id, None, loss.revision)
-    assert account_balance(investment.id) == Decimal("80")
-    assert_balanced()
-
-
-@pytest.mark.parametrize("typ", ["Checking", "Savings", "Wallet", "Credit Card", "Income Source", "Expense Payee", "Equity"])
-def test_return_rejects_noninvestment_account(app, typ):
-    other = account("Not an investment", "0", typ=typ)
-    with pytest.raises(ApiError, match="same investment account"):
-        transaction(other.id, other.id, typ="Return")
-
-
-def test_return_requires_same_account_and_matching_amounts(app):
-    first, second = account(typ="Brokerage"), account("IRA", typ="Roth IRA")
-    for source, destination in [(first.id, second.id), (system_id("income"), first.id)]:
-        with pytest.raises(ApiError, match="same investment account"):
-            transaction(source, destination, typ="Return")
-    with pytest.raises(ApiError, match="not zero"):
-        transaction(first.id, first.id, "0", typ="Return")
-    with pytest.raises(ApiError, match="Amounts must agree"):
-        transaction(first.id, first.id, "-5", typ="Return", destination_amount="5")
 
 
 @pytest.mark.parametrize("typ", ["Expense", "Income", "Transfer"])
@@ -307,27 +278,6 @@ def test_other_transaction_amounts_must_stay_positive(app, typ, value):
         transaction(source, destination, "5", typ=typ, destination_amount=value)
     with pytest.raises(ApiError, match="different accounts"):
         transaction(checking.id, checking.id, "5", typ=typ)
-
-
-def test_foreign_return_uses_signed_native_and_usd_amounts(app):
-    save_record("rate", {"currency": "EUR", "date": "2025-01-01", "rate": "1.25"}, None)
-    investment = account("Euro investment", "0", "EUR", "Brokerage")
-    loss = transaction(investment.id, investment.id, "-8", typ="Return")
-    assert account_balance(investment.id) == Decimal("-8")
-    assert Decimal(loss.data["usd_amount"]) == Decimal("-10")
-    assert Decimal(loss.data["destination_usd_amount"]) == Decimal("-10")
-    assert_balanced()
-
-
-def test_signed_return_subscription(app):
-    investment = account(typ="Brokerage")
-    sub = save_record("subscription", {"name": "Monthly loss", "type": "Return",
-        "source_account_id": investment.id, "destination_account_id": investment.id,
-        "amount": "-5", "start_date": "2025-01-05", "frequency": "monthly"}, None)
-    tx = transaction(investment.id, investment.id, "-5", typ="Return")
-    assert tx.data["subscription_id"] == sub.id
-    assert account_balance(investment.id) == Decimal("95")
-    assert_balanced()
 
 
 def test_revision_conflict_and_edit_changes_both_postings(app):
