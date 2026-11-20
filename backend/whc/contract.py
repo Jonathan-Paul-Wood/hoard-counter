@@ -27,7 +27,7 @@ SCHEMAS = {
     'Subscription': obj({**META, 'name': string(), 'type': string(), 'source_account_id': ID, 'destination_account_id': ID, 'amount': MONEY, 'currency': string(), 'start_date': DAY, 'end_date': {'anyOf': [DAY, {'type': 'null'}]}, 'frequency': string(enum=['daily', 'weekly', 'monthly', 'yearly']), 'interval': {'type': 'integer', 'minimum': 1}, 'category_id': {'anyOf': [ID, {'type': 'null'}]}, 'amount_tolerance': MONEY, 'day_tolerance': {'type': 'integer'}, 'active': {'type': 'boolean'}}, ['id', 'revision', 'last_modified', 'name', 'source_account_id', 'destination_account_id', 'amount', 'start_date', 'frequency']),
     'RuleCondition': obj({'field': string(), 'operator': string(enum=['eq', 'neq', 'contains', 'gte', 'lte']), 'value': {}}, ['field', 'operator', 'value']),
     'Rule': obj({**META, 'name': string(), 'priority': {'type': 'integer'}, 'enabled': {'type': 'boolean'}, 'conditions': {'type': 'array', 'items': ref('RuleCondition')}, 'actions': obj({'category_id': ID, 'tag_ids': {'type': 'array', 'items': ID}, 'notes': string(), 'subscription_id': ID})}, ['id', 'revision', 'last_modified', 'name', 'conditions', 'actions']),
-    'Budget': obj({**META, 'month': string(pattern=r'^\d{4}-\d{2}$'), 'category_id': ID, 'amount': MONEY}, ['id', 'revision', 'last_modified', 'month', 'category_id', 'amount']),
+    'Budget': obj({**META, 'category_id': ID, 'amount': MONEY, 'start_date': DAY, 'end_date': {'anyOf': [DAY, {'type': 'null'}]}, 'period': string(enum=['day', 'week', 'month', 'year']), 'frequency': {'type': 'integer', 'minimum': 1}}, ['id', 'revision', 'last_modified', 'category_id', 'amount', 'start_date', 'period', 'frequency']),
     'Rate': obj({**META, 'currency': string(), 'date': DAY, 'rate': MONEY}, ['id', 'revision', 'last_modified', 'currency', 'date', 'rate']),
     'Valuation': obj({**META, 'account_id': ID, 'date': DAY, 'amount': MONEY, 'fx_rate': MONEY, 'usd_amount': MONEY}, ['id', 'revision', 'last_modified', 'account_id', 'date', 'amount']),
     'Scenario': obj({**META, 'name': string(), 'date': DAY, 'assumptions': {'type': 'array', 'items': ref('ProjectionAssumption')}, 'flows': {'type': 'array', 'items': ref('PlannedFlow')}}, ['id', 'revision', 'last_modified', 'name']),
@@ -147,7 +147,7 @@ def specification():
     paths['/auth/logout'] = {'post': operation('Sign out', obj({'message': string(), 'csrf_token': string()}, ['message', 'csrf_token']), method='post')}
     for route in ('meta', 'dashboard', 'budget-summary', 'forecast', 'performance', 'reports/data', 'audit', 'settings', 'users', 'backups/status', 'attachments'):
         paths['/' + route] = {'get': operation('Read ' + route)}
-    for route, schema in [('budgets/copy', obj({'source_month': string(), 'target_month': string()}, ['source_month', 'target_month'])), ('projections', ref('ProjectionRequest')), ('imports/commit', obj({'token': ID}, ['token']))]:
+    for route, schema in [('budget-projections', obj({'date': DAY, 'budget_ids': {'type': 'array', 'items': ID}}, ['date', 'budget_ids'])), ('projections', ref('ProjectionRequest')), ('imports/commit', obj({'token': ID}, ['token']))]:
         paths['/' + route] = {'post': operation(route, request_schema=schema, method='post')}
     for route, mime in [('reports/csv', 'text/csv'), ('reports/pdf', 'application/pdf'), ('exports', 'application/zip')]:
         paths['/' + route] = {'get': {'summary': 'Download ' + route, 'responses': {'200': {'description': 'File download', 'content': {mime: {'schema': string(format='binary')}}}}, 'parameters': [{'name': key, 'in': 'query', 'schema': string()} for key in ('start', 'end', 'account_id', 'type', 'category_id', 'tag_id', 'subscription_id', 'currency', 'account_type', 'format')]}}
@@ -188,6 +188,8 @@ def specification():
     paths['/accounts/{id}/reconcile'] = {'parameters': [id_parameter], 'post': operation('Record balance reconciliation', ref('ReconciliationResult'), ref('ReconciliationInput'), 'post')}
     occurrences = operation('List expected subscription occurrences', obj({'items': {'type': 'array', 'items': ref('SubscriptionOccurrence')}}, ['items']))
     occurrences['parameters'] = [query('start', DAY), query('end', DAY)]
+    paths['/budgets/{id}/projection'] = {'parameters': [id_parameter], 'get': operation('Project category allowance', request_schema=None)}
+    paths['/budgets/{id}/projection']['get']['parameters'] = [{'name': 'date', 'in': 'query', 'required': True, 'schema': DAY}]
     paths['/subscriptions/{id}/occurrences'] = {'parameters': [id_parameter], 'get': occurrences}
     paths['/imports/commit'] = {'post': operation('Commit a validated import preview', ref('ImportResult'), obj({'token': ID}, ['token']), 'post')}
     paths['/imports/preview']['post']['description'] = 'Preview is atomic and does not save imported records. Inspect errors and conflicts before committing the token; previews expire after 30 minutes and reject ledger changes since preview.'
@@ -201,7 +203,7 @@ def specification():
     for route in ('dashboard', 'reports/data', 'reports/csv', 'reports/pdf'):
         paths['/' + route]['get']['parameters'] = deepcopy(filters)
     paths['/reports/csv']['get']['parameters'].append(query('section', string(enum=['transactions', 'summary', 'cash-flow', 'budgets', 'balances', 'net-worth', 'audit'], default='transactions')))
-    paths['/budget-summary']['get']['parameters'] = [query('month', string(pattern=r'^\d{4}-\d{2}$'))]
+    paths['/budget-summary']['get']['parameters'] = [query('as_of', DAY), query('month', string(pattern=r'^\d{4}-\d{2}$'))]
     paths['/forecast']['get']['parameters'] = [query('horizon', string(enum=['month', 'quarter', 'year'], default='month'))]
     paths['/performance']['get']['parameters'] = [query('account_id', ID, required=True)]
     paths['/exports']['get']['parameters'] = [query('format', string(enum=['archive', 'accounts', 'transactions'], default='archive')), query('template', {'type': 'boolean', 'default': False})]

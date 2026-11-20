@@ -40,7 +40,7 @@ def test_dashboard_budgets_refunds_and_report_totals(household):
     app, client, headers, create, account, category = household
     create('transactions', expense(account, category, '100'))
     create('transactions', dict(source_account_id=system_id('expense'), destination_account_id=account['id'], type='Expense', date='2026-07-16', amount='25', description='Refund', category_id=category['id'], is_refund=True))
-    create('budgets', {'month': '2026-07', 'category_id': category['id'], 'amount': '150'})
+    create('budgets', {'start_date': '2026-07-01', 'end_date': '2026-07-31', 'period': 'month', 'frequency': 1, 'category_id': category['id'], 'amount': '150'})
     summary = client.get('/api/v1/budget-summary?month=2026-07').json
     assert Decimal(summary['total_actual']) == 75
     assert Decimal(summary['items'][0]['remaining']) == 75
@@ -49,16 +49,14 @@ def test_dashboard_budgets_refunds_and_report_totals(household):
     dashboard = client.get('/api/v1/dashboard?start=2026-07-01&end=2026-07-31').json
     assert dashboard['expenses'] == data['summary']['expenses']
     assert Decimal(dashboard['assets']) == 925
-    copied = client.post('/api/v1/budgets/copy', headers=headers, json={'source_month': '2026-07', 'target_month': '2026-08'})
-    assert copied.status_code == 200
-    assert copied.json['copied'] == 1
+
 
 
 def test_all_csv_report_sections_share_totals_and_preserve_audit(household):
     _, client, headers, create, account, category = household
     purchase = create('transactions', {**expense(account, category, '100'), 'description': '=1+1'})
     create('transactions', dict(source_account_id=system_id('expense'), destination_account_id=account['id'], type='Expense', date='2026-07-16', amount='25', description='Refund', category_id=category['id'], is_refund=True))
-    create('budgets', {'month': '2026-07', 'category_id': category['id'], 'amount': '150'})
+    create('budgets', {'start_date': '2026-07-01', 'end_date': '2026-07-31', 'period': 'month', 'frequency': 1, 'category_id': category['id'], 'amount': '150'})
     query = '?start=2026-07-01&end=2026-07-31'
     data = client.get('/api/v1/reports/data' + query).json
     sections = {}

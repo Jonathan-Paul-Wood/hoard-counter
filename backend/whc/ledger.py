@@ -304,14 +304,25 @@ def _validate(kind, data, existing, preserve_snapshots=False, historical=False):
         if not historical and any(r.id != (existing.id if existing else None) and r.data["currency"] == data["currency"] and r.data["date"] == data["date"] for r in list_records("rate")):
             raise ApiError("A rate already exists for this currency and date", 409)
     elif kind == "budget":
-        month = data.get("month", "")
-        date_string(month + "-01", "month")
+        data["start_date"] = date_string(data.get("start_date"), "start_date")
+        data["end_date"] = date_string(data["end_date"], "end_date") if data.get("end_date") else None
+        if data["end_date"] and data["end_date"] < data["start_date"]:
+            raise ApiError("Budget end precedes its start")
+        if data.get("period") not in ("day", "week", "month", "year"):
+            raise ApiError("Budget period must be day, week, month, or year")
+        frequency = data.get("frequency")
+        if isinstance(frequency, bool) or not isinstance(frequency, int) or frequency < 1:
+            raise ApiError("Budget frequency must be a positive integer")
         _reference(data, "category_id", "category", True, historical)
+        if not historical:
+            for other in list_records("budget"):
+                if other.id == (existing.id if existing else None) or other.data["category_id"] != data["category_id"]:
+                    continue
+                if data["start_date"] <= (other.data.get("end_date") or "9999-12-31") and other.data["start_date"] <= (data["end_date"] or "9999-12-31"):
+                    raise ApiError("This category already has a budget active during these dates", 409, "budget_overlap")
         data["amount"] = amount(data.get("amount"), "USD")
         if decimal(data["amount"]) < 0:
             raise ApiError("Budget amount cannot be negative")
-        if not historical and any(r.id != (existing.id if existing else None) and r.data.get("month") == month and r.data.get("category_id") == data["category_id"] for r in list_records("budget")):
-            raise ApiError("This category already has a budget for that month", 409)
     elif kind == "subscription":
         required_text(data, "name", 160)
         source = _reference(data, "source_account_id", "account", True, historical)

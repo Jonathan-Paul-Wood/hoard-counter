@@ -30,7 +30,13 @@ Subscriptions are expectations, not ledger transactions. Recurrence preserves th
 
 Expense forecasts cover the next calendar month, quarter, or year. They add unfulfilled recurring expense occurrences to the average nonrecurring category expense from up to three previous complete calendar months. Subscription-linked spending and transfers are excluded from that historical component; refunds reduce it. Forecasts show the actual history coverage and do not use budgets as expected spending. Dated manual FX rates available as of the forecast date value future non-USD subscriptions.
 
-Monthly category budgets compare their target with actual expenses less refunds. They do not allocate account cash to envelopes and do not roll funds forward automatically.
+Category budgets credit an amount in USD on their start date, then every positive integer frequency of days, weeks, months, or years. The optional end date is inclusive; leaving it blank makes the budget indefinite. Monthly and yearly occurrences stay anchored to the original start date, clamping to the last day of short months. Budget date ranges in the same category cannot overlap, including their endpoints.
+
+An allowance as of a date is all budget credits through that date minus all recorded category expenses through that date, net of refunds. Categories without budgets are excluded. Credits and allowance balances persist after a schedule ends, including through gaps before a later budget begins. Editing or deleting a budget recalculates its historical credits; end the schedule instead of deleting it to retain credits. Allowances do not move account cash and are never stored.
+
+The Budgets tab shows allowances for a selected date and all editable budget schedules. Its Projection modal accepts a future date and selected budgets. It carries forward today's allowance, adds future credits from checked schedules, and subtracts recorded future expenses and unfulfilled expense subscription occurrences in each selected category. Multiple selected schedules for a category produce one allowance. Linked subscription payments through the target date are counted once. Estimates use FX rates available today and flag missing rates. Projections are not saved.
+
+Migration `0004_reset_budgets` permanently removes existing budget records (including deleted records) and budget audit history for this overhaul. New budgets use the period/frequency model; no replacement budgets are seeded. Expenses, subscriptions, categories, and other ledger history are preserved.
 
 ## Investment valuations and projections
 
@@ -64,7 +70,7 @@ Opening balance, Reconciliation, and Liability credit rows are not ordinary tran
 
 ## Reports and history
 
-Screen, CSV, and PDF transaction summaries share the same backend calculations. Transaction filters apply to cash-flow summaries and transaction detail. Account/type/currency filters also restrict account balances. Category/tag/subscription filters do not allocate balances to categories. Monthly budget comparisons explicitly use complete calendar months; audit sections use the dates changes were recorded, which can differ from transaction dates.
+Screen, CSV, and PDF transaction summaries share the same backend calculations. Transaction filters apply to cash-flow summaries and transaction detail. Account/type/currency filters also restrict account balances. Category/tag/subscription filters do not allocate balances to categories. Budget allowance snapshots are cumulative through each month end, capped at the report end date, and include only tracked categories; audit sections use the dates changes were recorded, which can differ from transaction dates.
 
 Reports offers separate CSV downloads for transactions, summary totals, monthly cash flow, budgets, balances, net-worth history, and audit events. Transaction CSV `net_expense_usd` is signed: purchases are positive, refunds negative, and other transaction types zero. Summing that column reproduces reported spending. The audit CSV includes the full before/after values as JSON cells. CSV exports escape text that spreadsheet software could interpret as a formula.
 

@@ -15,7 +15,7 @@ export type RuleCondition = { field: string; operator: "eq" | "neq" | "contains"
 
 export type Rule = { id: string; revision: number; last_modified: string; deleted?: boolean; name: string; priority?: number; enabled?: boolean; conditions: Array<RuleCondition>; actions: { category_id?: string | null; tag_ids?: Array<string>; notes?: string; subscription_id?: string | null }; match?: "all" | "any" };
 
-export type Budget = { id: string; revision: number; last_modified: string; deleted?: boolean; month: string; category_id: string; amount: string };
+export type Budget = { id: string; revision: number; last_modified: string; deleted?: boolean; category_id: string; amount: string; start_date: string; end_date?: string | null; period: "day" | "week" | "month" | "year"; frequency: number };
 
 export type Rate = { id: string; revision: number; last_modified: string; deleted?: boolean; currency: string; date: string; rate: string };
 
@@ -99,7 +99,7 @@ export type SubscriptionInput = { name: string; type?: string; source_account_id
 
 export type RuleInput = { name: string; priority?: number; enabled?: boolean; conditions: Array<RuleCondition>; actions: { category_id?: string | null; tag_ids?: Array<string>; notes?: string; subscription_id?: string | null }; match?: "all" | "any" };
 
-export type BudgetInput = { month: string; category_id: string; amount: string };
+export type BudgetInput = { category_id: string; amount: string; start_date: string; end_date?: string | null; period: "day" | "week" | "month" | "year"; frequency: number };
 
 export type RateInput = { currency: string; date: string; rate: string };
 
