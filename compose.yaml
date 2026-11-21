@@ -24,7 +24,7 @@ services:
   api:
     image: *api-image
     build: *api-build
-    mem_limit: 2g
+    mem_limit: 1g
     restart: unless-stopped
     init: true
     environment:
@@ -60,7 +60,7 @@ services:
 
   web:
     image: ${IMAGE_PREFIX:-hoard-counter}-web:${APP_VERSION:?Set an immutable APP_VERSION}
-    mem_limit: 2g
+    mem_limit: 1g
     build:
       context: .
       dockerfile: deploy/frontend.Dockerfile
@@ -87,7 +87,7 @@ services:
 
   proxy:
     image: nginxinc/nginx-unprivileged:1.28-alpine
-    mem_limit: 2g
+    mem_limit: 1g
     restart: unless-stopped
     ports:
       - "${BIND_ADDRESS:-127.0.0.1}:${HTTP_PORT:-8080}:8080"
