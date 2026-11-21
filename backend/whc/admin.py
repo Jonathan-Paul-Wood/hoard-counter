@@ -123,9 +123,21 @@ def audit():
     return jsonify(items=[r.to_dict() for r in rows], total=count, page=page, page_size=size)
 
 
-def settings_dict():
+def private_settings():
     record = db.session.scalar(db.select(Record).where(Record.kind == 'setting', Record.deleted.is_(False)))
     return {**dict(household_name='Our hoard', timezone=current_app.config.get('HOUSEHOLD_TIMEZONE', 'America/New_York')), **(record.data if record else {}), 'default_currency': 'USD', 'version': os.environ.get('APP_VERSION', '1.0.0')}
+
+
+def redact_settings(data):
+    result = dict(data)
+    result['ocr_token_saved'] = bool(result.pop('ocr_token', ''))
+    result['ocr_url'] = result.get('ocr_url', '')
+    result['ocr_configured'] = bool(result['ocr_url'])
+    return result
+
+
+def settings_dict():
+    return redact_settings(private_settings())
 
 
 @bp.get('/settings')
@@ -140,9 +152,13 @@ def update_settings():
     body = request.get_json()
     if not isinstance(body, dict):
         raise ValueError('Provide a settings object.')
-    if any(k not in ('household_name', 'timezone') for k in body):
-        raise ValueError('Only hoard name and timezone can be updated.')
-    data = {**settings_dict(), **body}
+    if any(k not in ('household_name', 'timezone', 'ocr_url', 'ocr_token') for k in body):
+        raise ValueError('Unknown settings field.')
+    data = {**private_settings(), **body}
+    from .statement_import import validate_url
+    data['ocr_url'] = validate_url(data.get('ocr_url', ''))
+    if not isinstance(data.get('ocr_token', ''), str) or len(data.get('ocr_token', '')) > 4096 or any(not 33 <= ord(c) <= 126 for c in data.get('ocr_token', '')):
+        raise ValueError('Enter a valid OCR bearer token of at most 4096 characters.')
     if not isinstance(data['household_name'], str) or not data['household_name'].strip() or len(data['household_name']) > 100:
         raise ValueError('Enter a hoard name of at most 100 characters.')
     data['household_name'] = data['household_name'].strip()
@@ -153,7 +169,7 @@ def update_settings():
     except (ZoneInfoNotFoundError, ValueError):
         raise ValueError('Select a valid IANA timezone.')
     record = db.session.scalar(db.select(Record).where(Record.kind == 'setting', Record.deleted.is_(False)))
-    before = record.to_dict() if record else None
+    before = redact_settings(record.to_dict()) if record else None
     if not record:
         record = Record(kind='setting', data=data)
         db.session.add(record)
@@ -163,10 +179,10 @@ def update_settings():
         from .models import utcnow
         record.last_modified = utcnow()
     db.session.flush()
-    add_audit('setting', record.id, 'update', g.user, 'manual', before, record.to_dict())
+    add_audit('setting', record.id, 'update', g.user, 'manual', before, redact_settings(record.to_dict()))
     db.session.commit()
     current_app.config['HOUSEHOLD_TIMEZONE'] = data['timezone']
-    return jsonify(data)
+    return jsonify(redact_settings(data))
 
 
 @bp.get('/backups/status')

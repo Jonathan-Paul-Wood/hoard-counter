@@ -23,6 +23,7 @@ import {
   Scale,
   Plus,
   Archive,
+  FileUp,
 } from "lucide-react";
 import {
   api,
@@ -59,6 +60,7 @@ import {
   RuleEditor,
   TransactionEditor,
 } from "./editors";
+import { TransactionImport } from "./transaction-import";
 
 export function useFields(resource: string): FieldSpec[] {
   const { accounts, categories, meta } = useApp();
@@ -172,8 +174,15 @@ export function useFields(resource: string): FieldSpec[] {
       },
     ],
     categories: [
-      { name: "name", label: "Category name", required: true },
+      { name: "name", label: "Category name", required: true, maxLength: 36 },
       { name: "color", label: "Color", type: "color", default: "#315b46" },
+      {
+        name: "description",
+        label: "Description (optional)",
+        type: "textarea",
+        maxLength: 120,
+        wide: true,
+      },
     ],
     currencies: [
       { name: "code", label: "Three-letter currency code", required: true },
@@ -187,7 +196,7 @@ export function useFields(resource: string): FieldSpec[] {
         min: "0",
       },
     ],
-    tags: [{ name: "name", label: "Tag name", required: true }],
+    tags: [{ name: "name", label: "Tag name", required: true, maxLength: 36 }],
     rates: [
       {
         name: "currency",
@@ -708,6 +717,12 @@ export function Transactions({
   embedded?: boolean;
 }) {
   const { accounts, categories, tags, subscriptions, version } = useApp();
+  const { data: importSettings } = useLoad<{ ocr_configured?: boolean }>(
+    "/settings",
+    {},
+    version,
+  );
+  const [importOpen, setImportOpen] = useState(false);
   const [page, setPage] = useState(1);
   const [sort, setSort] = useState<TableSort | null>(null);
   const [filters, setFilters] = useState<Record<string, string>>({
@@ -740,9 +755,17 @@ export function Transactions({
           title="Transactions"
           subtitle="Every movement, thoughtfully accounted for."
           action={
-            <AddButton onClick={() => setEditor(null)}>
-              Add transaction
-            </AddButton>
+            <div className="transaction-actions">
+              <AddButton onClick={() => setEditor(null)}>
+                Add transaction
+              </AddButton>
+              {importSettings.ocr_configured && (
+                <Button variant="secondary" onClick={() => setImportOpen(true)}>
+                  <FileUp size={16} />
+                  Import Transactions
+                </Button>
+              )}
+            </div>
           }
         />
       )}
@@ -915,6 +938,7 @@ export function Transactions({
           onClose={() => setRemoved(null)}
         />
       )}
+      {importOpen && <TransactionImport onClose={() => setImportOpen(false)} />}
     </>
   );
 }

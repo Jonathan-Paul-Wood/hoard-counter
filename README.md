@@ -7,6 +7,7 @@ A private household ledger for budgeting, spending, subscriptions, investment pl
 - Individual household logins with administrator/member permissions.
 - Exact-decimal, double-entry transactions, editable history, refunds, native currencies, dated USD conversion rates, and asset/debt balances.
 - Receipts and item images, categories/tags, recurring subscriptions, transaction rules, and recurring category budgets with cumulative allowances and future projections.
+- Optional OCR Processor connection for bank statement uploads, editable transaction previews, transfer suggestions, and reviewed batch creation.
 - History-based expense forecasts, aggregate investment valuations, cash-flow-adjusted performance, and saved projection scenarios.
 - Filtered CSV/PDF reports, editable CSV templates, previewed UUID/timestamp imports, and complete financial archives with attachments.
 - Persistent Docker storage, Alembic migrations, verified weekly backups with calendar retention, and an upgrade/restore command.

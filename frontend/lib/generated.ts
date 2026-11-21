@@ -3,9 +3,9 @@ export type EntityMeta = { id: string; revision: number; last_modified: string; 
 
 export type Account = { id: string; revision: number; last_modified: string; deleted?: boolean; name: string; type: string; account_class: "asset" | "liability" | "income" | "expense" | "equity"; currency: string; opening_balance?: string; opening_date?: string; opening_fx_rate?: string; balance: string; balance_usd?: string | null; signed_balance?: string; signed_balance_usd?: string | null; as_of?: string; valuation_date?: string | null; missing_rate?: boolean; account_number?: string | null; description?: string; closed_on?: string | null; opening_currency?: string; opening_posting_snapshots?: Record<string, unknown> };
 
-export type Transaction = { id: string; revision: number; last_modified: string; deleted?: boolean; source_account_id: string; destination_account_id: string; date: string; amount: string; destination_amount?: string; description: string; type: "Income" | "Expense" | "Transfer"; currency?: string; usd_amount?: string; fx_rate?: string; destination_fx_rate?: string; category_id?: string | null; tag_ids?: Array<string>; notes?: string | null; subscription_id?: string | null; subscription_date?: string | null; is_refund?: boolean; investment_fee?: boolean; destination_currency?: string; destination_usd_amount?: string; posting_snapshots?: Record<string, unknown> };
+export type Transaction = { id: string; revision: number; last_modified: string; deleted?: boolean; source_account_id: string; destination_account_id: string; date: string; amount: string; destination_amount?: string; description: string; type: "Income" | "Expense" | "Transfer"; currency?: string; usd_amount?: string; fx_rate?: string; destination_fx_rate?: string; category_id?: string | null; tag_ids?: Array<string>; notes?: string | null; subscription_id?: string | null; subscription_date?: string | null; is_refund?: boolean; investment_fee?: boolean; destination_currency?: string; destination_usd_amount?: string; posting_snapshots?: Record<string, unknown>; import_sources?: Array<StatementSource>; import_batch_id?: string };
 
-export type Category = { id: string; revision: number; last_modified: string; deleted?: boolean; name: string };
+export type Category = { id: string; revision: number; last_modified: string; deleted?: boolean; name: string; color?: string; description?: string };
 
 export type Tag = { id: string; revision: number; last_modified: string; deleted?: boolean; name: string };
 
@@ -51,9 +51,9 @@ export type UserInput = { username: string; password: string; role?: "admin" | "
 
 export type UserPatch = { username?: string; password?: string; role?: "admin" | "member"; active?: boolean };
 
-export type Settings = { household_name: string; timezone: string; default_currency: "USD"; version: string };
+export type Settings = { household_name: string; timezone: string; default_currency: "USD"; version: string; ocr_url?: string; ocr_configured?: boolean; ocr_token_saved?: boolean };
 
-export type SettingsPatch = { household_name?: string; timezone?: string };
+export type SettingsPatch = { household_name?: string; timezone?: string; ocr_url?: string; ocr_token?: string };
 
 export type CurrencyDefinition = { id: string; code: string; name: string; precision: number; builtin: boolean; revision?: number; last_modified?: string; deleted?: boolean };
 
@@ -87,11 +87,25 @@ export type ImportPreview = { token: string; summary: ImportSummary; changes: Ar
 
 export type ImportResult = { summary: ImportSummary; changes: Array<ImportChange> };
 
+export type OcrCapabilities = { extraction_configured?: boolean; ocr_available?: boolean; formats?: Array<string>; limits?: { files?: number; upload_bytes?: number; pages?: number; pixels_per_page?: number; text_chars?: number; timeout_seconds?: number } };
+
+export type StatementSource = { filename: string; document: number; page: number };
+
+export type StatementTransaction = { type: string; date: string; description: string; source_account_id: string; destination_account_id: string; amount: string; currency: string; destination_amount?: string; destination_currency?: string; notes?: string; category_id?: string | null; tag_ids?: Array<string>; is_refund?: boolean; investment_fee?: boolean; subscription_id?: string | null; subscription_date?: string | null };
+
+export type StatementRow = { id: string; transaction: StatementTransaction; sources: Array<StatementSource>; selected?: boolean; warnings?: Array<string>; errors?: Array<string>; duplicate_ids?: Array<string>; transfer_candidates?: Array<string>; acknowledged_duplicates?: Array<string> };
+
+export type StatementPreview = { batch_id: string; rows: Array<StatementRow>; warnings: Array<string> };
+
+export type StatementApproval = { batch_id: string; rows: Array<StatementRow> };
+
+export type StatementImportResult = { transaction_ids: Array<string>; total: number };
+
 export type AccountInput = { name: string; type: string; account_class?: "asset" | "liability" | "income" | "expense" | "equity"; currency?: string; opening_balance?: string; opening_date?: string; account_number?: string | null; description?: string; closed_on?: string | null; opening_currency?: string };
 
 export type TransactionInput = { source_account_id: string; destination_account_id: string; date: string; amount: string; destination_amount?: string; description: string; type: "Income" | "Expense" | "Transfer"; currency?: string; category_id?: string | null; tag_ids?: Array<string>; notes?: string | null; subscription_id?: string | null; subscription_date?: string | null; is_refund?: boolean; investment_fee?: boolean; destination_currency?: string };
 
-export type CategoryInput = { name: string };
+export type CategoryInput = { name: string; color?: string; description?: string };
 
 export type TagInput = { name: string };
 

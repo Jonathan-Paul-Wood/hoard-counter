@@ -3022,3 +3022,52 @@ th {
 .budget-projection-results {
   padding: 24px 28px;
 }
+.transaction-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+}
+.import-fieldset {
+  border: 0;
+  padding: 0;
+  margin: 1rem 0;
+  min-width: 0;
+}
+.statement-preview-scroll {
+  overflow-x: auto;
+  max-height: 60vh;
+}
+.statement-preview {
+  min-width: 1280px;
+  width: 100%;
+}
+.statement-preview td {
+  vertical-align: top;
+  white-space: normal;
+  min-width: 190px;
+}
+.statement-preview td:first-child {
+  min-width: 55px;
+}
+.statement-preview .field {
+  margin-bottom: 0.6rem;
+}
+.statement-preview .field input,
+.statement-preview .field select,
+.statement-preview .field textarea {
+  width: 100%;
+  min-width: 0;
+}
+.import-row-error {
+  background: #fff2ee;
+}
+.import-error {
+  color: #9b302c;
+}
+.modal.wide.statement-import-modal {
+  max-width: 1500px;
+}
+.statement-import-body {
+  padding: 0 28px 20px;
+}

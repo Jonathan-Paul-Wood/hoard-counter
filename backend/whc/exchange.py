@@ -49,7 +49,10 @@ def exported_records():
             continue
         if row.kind == 'transaction' and row.data.get('system') in ('opening', 'valuation'):
             continue
-        records.append(dict(kind=row.kind, record=row.to_dict()))
+        data = row.to_dict()
+        if row.kind == 'setting':
+            data.pop('ocr_token', None)
+        records.append(dict(kind=row.kind, record=data))
     return records
 
 
@@ -267,6 +270,11 @@ def validate_audits(audits):
 
 def comparable(data, kind):
     result = {k: v for k, v in data.items() if k not in READONLY} | {'deleted': bool(data.get('deleted', False))}
+    if kind == 'setting':
+        for key in ('ocr_token', 'ocr_token_saved', 'ocr_configured'):
+            result.pop(key, None)
+    if kind == 'category':
+        result.setdefault('description', '')
     if kind == 'account':
         result.setdefault('description', '')
         result.setdefault('account_number', None)
@@ -303,6 +311,12 @@ def import_special(kind, data, existing, actor):
         if not isinstance(clean.get('sha256'), str) or not re.fullmatch('[0-9a-f]{64}', clean['sha256']):
             raise ValueError('Attachment checksum is missing.')
     elif kind == 'setting':
+        # Credentials are configured locally, never exported or accepted through archives.
+        clean.pop('ocr_token', None)
+        if existing and existing.data.get('ocr_token'):
+            clean['ocr_token'] = existing.data['ocr_token']
+        from .statement_import import validate_url
+        clean['ocr_url'] = validate_url(clean.get('ocr_url', ''))
         # Settings can only be changed by an administrator, including imports.
         if actor.role != 'admin':
             raise ApiError('Only administrators can import hoard settings.', 403)
@@ -347,7 +361,12 @@ def import_special(kind, data, existing, actor):
         rebuild_account_valuations(account.id, actor)
         if before and before.get('account_id') != account.id:
             rebuild_account_valuations(before['account_id'], actor)
-    add_audit(kind, identity, 'import', actor, 'import', before, record.to_dict())
+    after = record.to_dict()
+    if kind == 'setting':
+        from .admin import redact_settings
+        before = redact_settings(before) if before else None
+        after = redact_settings(after)
+    add_audit(kind, identity, 'import', actor, 'import', before, after)
     return record
 
 
@@ -395,6 +414,9 @@ def apply_import(records, mode, actor):
                         raise ValueError(f'Firefly CSV row {entry.get("line")}: {exc}') from exc
                     raise
             change['after'] = record.to_dict()
+            if kind == 'setting':
+                from .admin import redact_settings
+                change['after'] = redact_settings(change['after'])
         changes.append(change)
     db.session.flush()
     for account in list_records('account'):

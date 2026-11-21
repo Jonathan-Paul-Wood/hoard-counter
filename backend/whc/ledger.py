@@ -89,6 +89,8 @@ def account_balance(account_id, through=None):
 
 def public_record(record):
     result = record.to_dict()
+    if record.kind == "category":
+        result.setdefault("description", "")
     if record.kind == "account":
         as_of = datetime.now(ZoneInfo(current_app.config.get("HOUSEHOLD_TIMEZONE", "America/New_York"))).date().isoformat()
         balance = account_balance(record.id, through=as_of)
@@ -267,7 +269,14 @@ def _validate(kind, data, existing, preserve_snapshots=False, historical=False):
     elif kind == "transaction":
         _validate_transaction(data, existing, preserve_snapshots, historical)
     elif kind in ("category", "tag"):
-        required_text(data, "name", 120)
+        required_text(data, "name", 36)
+        if kind == "category":
+            description = data.get("description", "")
+            if description is None:
+                description = ""
+            if not isinstance(description, str) or len(description) > 120:
+                raise ApiError("description must be text of at most 120 characters")
+            data["description"] = description
     elif kind == "currency":
         required_text(data, "name", 120)
         data["code"] = str(data.get("code", "")).upper()

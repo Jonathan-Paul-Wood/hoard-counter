@@ -23,6 +23,7 @@ export type FieldSpec = {
   default?: any;
   min?: string;
   step?: string;
+  maxLength?: number;
 };
 export function RecordEditor({
   resource,
@@ -145,6 +146,7 @@ export function RecordEditor({
                 </select>
               ) : f.type === "textarea" ? (
                 <textarea
+                  maxLength={f.maxLength}
                   value={values[f.name]}
                   onChange={(e) => setField(f.name, e.target.value)}
                   required={f.required}
@@ -163,6 +165,7 @@ export function RecordEditor({
                 </span>
               ) : (
                 <input
+                  maxLength={f.maxLength}
                   type={
                     f.type === "integer"
                       ? "number"

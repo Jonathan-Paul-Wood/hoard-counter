@@ -140,12 +140,14 @@ export function Modal({
   children,
   onClose,
   wide = false,
+  className = "",
 }: {
   title: string;
   subtitle?: string;
   children: ReactNode;
   onClose: () => void;
   wide?: boolean;
+  className?: string;
 }) {
   const panel = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -188,7 +190,7 @@ export function Modal({
     >
       <div
         ref={panel}
-        className={`modal ${wide ? "wide" : ""}`}
+        className={`modal ${wide ? "wide" : ""} ${className}`}
         role="dialog"
         aria-modal="true"
         aria-labelledby="modal-title"

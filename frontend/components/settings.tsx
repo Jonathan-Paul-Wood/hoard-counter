@@ -27,6 +27,7 @@ import {
   useLoad,
 } from "./ui";
 import { ResourceTable } from "./records";
+import { OcrSettings } from "./ocr-settings";
 
 export function Settings() {
   const { session, version } = useApp();
@@ -43,6 +44,7 @@ export function Settings() {
       ? [
           ["currencies", "Currencies"],
           ["hoard", "Hoard"],
+          ["ocr", "OCR Processor"],
           ["users", "People"],
           ["backups", "Backups"],
         ]
@@ -81,6 +83,10 @@ export function Settings() {
                   {r.name}
                 </span>
               ),
+            },
+            {
+              key: "description",
+              label: "Description",
             },
             {
               key: "last_modified",
@@ -178,6 +184,7 @@ export function Settings() {
         />
       )}{" "}
       {tab === "hoard" && <Hoard />}{" "}
+      {tab === "ocr" && session.user.role === "admin" && <OcrSettings />}
       {tab === "users" && (
         <ResourceTable
           resource="users"

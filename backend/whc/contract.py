@@ -22,8 +22,8 @@ SCHEMAS = {
     'EntityMeta': obj(META, ['id', 'revision', 'last_modified']),
     'Account': obj({**META, 'name': string(), 'type': string(), 'account_class': string(enum=['asset', 'liability', 'income', 'expense', 'equity']), 'currency': string(), 'opening_balance': MONEY, 'opening_date': DAY, 'opening_fx_rate': MONEY, 'balance': MONEY, 'balance_usd': {'anyOf': [MONEY, {'type': 'null'}]}, 'signed_balance': MONEY, 'signed_balance_usd': {'anyOf': [MONEY, {'type': 'null'}]}, 'as_of': DAY, 'valuation_date': {'anyOf': [DAY, {'type': 'null'}]}, 'missing_rate': {'type': 'boolean'}}, ['id', 'revision', 'last_modified', 'name', 'type', 'account_class', 'currency', 'balance']),
     'Transaction': obj({**META, 'source_account_id': ID, 'destination_account_id': ID, 'date': DAY, 'amount': MONEY, 'destination_amount': MONEY, 'description': string(), 'type': string(enum=['Income', 'Expense', 'Transfer']), 'currency': string(), 'usd_amount': MONEY, 'fx_rate': MONEY, 'destination_fx_rate': MONEY, 'category_id': {'anyOf': [ID, {'type': 'null'}]}, 'tag_ids': {'type': 'array', 'items': ID}, 'notes': string(), 'subscription_id': {'anyOf': [ID, {'type': 'null'}]}, 'subscription_date': {'anyOf': [DAY, {'type': 'null'}]}, 'is_refund': {'type': 'boolean'}, 'investment_fee': {'type': 'boolean'}}, ['id', 'revision', 'last_modified', 'source_account_id', 'destination_account_id', 'date', 'amount', 'description', 'type']),
-    'Category': obj({**META, 'name': string()}, ['id', 'revision', 'last_modified', 'name']),
-    'Tag': obj({**META, 'name': string()}, ['id', 'revision', 'last_modified', 'name']),
+    'Category': obj({**META, 'name': string(maxLength=36), 'color': string(), 'description': string(maxLength=120, default='')}, ['id', 'revision', 'last_modified', 'name']),
+    'Tag': obj({**META, 'name': string(maxLength=36)}, ['id', 'revision', 'last_modified', 'name']),
     'Subscription': obj({**META, 'name': string(), 'type': string(), 'source_account_id': ID, 'destination_account_id': ID, 'amount': MONEY, 'currency': string(), 'start_date': DAY, 'end_date': {'anyOf': [DAY, {'type': 'null'}]}, 'frequency': string(enum=['daily', 'weekly', 'monthly', 'yearly']), 'interval': {'type': 'integer', 'minimum': 1}, 'category_id': {'anyOf': [ID, {'type': 'null'}]}, 'amount_tolerance': MONEY, 'day_tolerance': {'type': 'integer'}, 'active': {'type': 'boolean'}}, ['id', 'revision', 'last_modified', 'name', 'source_account_id', 'destination_account_id', 'amount', 'start_date', 'frequency']),
     'RuleCondition': obj({'field': string(), 'operator': string(enum=['eq', 'neq', 'contains', 'gte', 'lte']), 'value': {}}, ['field', 'operator', 'value']),
     'Rule': obj({**META, 'name': string(), 'priority': {'type': 'integer'}, 'enabled': {'type': 'boolean'}, 'conditions': {'type': 'array', 'items': ref('RuleCondition')}, 'actions': obj({'category_id': ID, 'tag_ids': {'type': 'array', 'items': ID}, 'notes': string(), 'subscription_id': ID})}, ['id', 'revision', 'last_modified', 'name', 'conditions', 'actions']),
@@ -92,6 +92,20 @@ SCHEMAS['Transaction']['properties']['notes'] = {'anyOf': [string(maxLength=1000
 SCHEMAS['Attachment']['properties']['path'] = string(description='Private immutable UUID filename; download through the authenticated attachment endpoint.')
 SCHEMAS['Error']['properties']['error'] = {'anyOf': [string(), obj({'code': string(), 'message': string(), 'details': {}})]}
 
+SCHEMAS['Settings']['properties'].update(ocr_url=string(), ocr_configured={'type': 'boolean'}, ocr_token_saved={'type': 'boolean'})
+SCHEMAS['SettingsPatch']['properties'].update(ocr_url=string(maxLength=2048), ocr_token=string(maxLength=4096, writeOnly=True, description='Omit to keep the saved token; empty string clears it.'))
+SCHEMAS.update({
+    'OcrCapabilities': obj({'extraction_configured': {'type': 'boolean'}, 'ocr_available': {'type': 'boolean'}, 'formats': {'type': 'array', 'items': string()}, 'limits': obj({key: {'type': 'integer'} for key in ('files', 'upload_bytes', 'pages', 'pixels_per_page', 'text_chars', 'timeout_seconds')})}),
+    'StatementSource': obj({'filename': string(maxLength=255), 'document': {'type': 'integer', 'minimum': 1}, 'page': {'type': 'integer', 'minimum': 1}}, ['filename', 'document', 'page']),
+    'StatementTransaction': obj({**{key: string() for key in ('type', 'date', 'description', 'source_account_id', 'destination_account_id', 'amount', 'currency', 'destination_amount', 'destination_currency', 'notes')}, 'category_id': {'anyOf': [ID, {'type': 'null'}]}, 'tag_ids': {'type': 'array', 'items': ID}, 'is_refund': {'type': 'boolean'}, 'investment_fee': {'type': 'boolean'}}, ['type', 'date', 'description', 'source_account_id', 'destination_account_id', 'amount', 'currency']),
+    'StatementRow': obj({'id': ID, 'transaction': ref('StatementTransaction'), 'sources': {'type': 'array', 'items': ref('StatementSource')}, 'selected': {'type': 'boolean'}, **{key: {'type': 'array', 'items': string()} for key in ('warnings', 'errors', 'duplicate_ids', 'transfer_candidates', 'acknowledged_duplicates')}}, ['id', 'transaction', 'sources']),
+    'StatementPreview': obj({'batch_id': ID, 'rows': {'type': 'array', 'items': ref('StatementRow')}, 'warnings': {'type': 'array', 'items': string()}}, ['batch_id', 'rows', 'warnings']),
+    'StatementApproval': obj({'batch_id': ID, 'rows': {'type': 'array', 'items': ref('StatementRow'), 'minItems': 1, 'maxItems': 500}}, ['batch_id', 'rows']),
+    'StatementImportResult': obj({'transaction_ids': {'type': 'array', 'items': ID}, 'total': {'type': 'integer'}}, ['transaction_ids', 'total']),
+})
+SCHEMAS['StatementTransaction']['properties'].update(subscription_id={'anyOf': [ID, {'type': 'null'}]}, subscription_date={'anyOf': [string(), {'type': 'null'}]})
+SCHEMAS['Transaction']['properties'].update(import_sources={'type': 'array', 'items': ref('StatementSource'), 'readOnly': True}, import_batch_id={**ID, 'readOnly': True})
+
 
 def specification():
     schemas = deepcopy(SCHEMAS)
@@ -106,7 +120,7 @@ def specification():
         return value
     for plural, name in [('accounts', 'Account'), ('transactions', 'Transaction'), ('categories', 'Category'), ('tags', 'Tag'), ('subscriptions', 'Subscription'), ('rules', 'Rule'), ('budgets', 'Budget'), ('rates', 'Rate'), ('valuations', 'Valuation'), ('scenarios', 'Scenario'), ('currencies', 'Currency')]:
         writable = deepcopy(schemas[name])
-        for key in ('id', 'revision', 'last_modified', 'deleted', 'balance', 'balance_usd', 'signed_balance', 'signed_balance_usd', 'as_of', 'valuation_date', 'missing_rate', 'usd_amount', 'opening_fx_rate', 'fx_rate', 'destination_fx_rate'):
+        for key in ('id', 'revision', 'last_modified', 'deleted', 'balance', 'balance_usd', 'signed_balance', 'signed_balance_usd', 'as_of', 'valuation_date', 'missing_rate', 'usd_amount', 'opening_fx_rate', 'fx_rate', 'destination_fx_rate', 'import_sources', 'import_batch_id'):
             writable['properties'].pop(key, None)
         writable['required'] = [key for key in writable['required'] if key in writable['properties']]
         if name == 'Account':
@@ -194,6 +208,14 @@ def specification():
     paths['/budgets/{id}/projection'] = {'parameters': [id_parameter], 'get': operation('Project category allowance', request_schema=None)}
     paths['/budgets/{id}/projection']['get']['parameters'] = [{'name': 'date', 'in': 'query', 'required': True, 'schema': DAY}]
     paths['/subscriptions/{id}/occurrences'] = {'parameters': [id_parameter], 'get': occurrences}
+    paths['/ocr/test'] = {'post': operation('Test saved OCR Processor connection (administrator)', ref('OcrCapabilities'), method='post')}
+    preview = operation('Analyze bank statements without saving transactions', ref('StatementPreview'), method='post')
+    preview['requestBody'] = {'required': True, 'content': {'multipart/form-data': {'schema': obj({'documents': {'type': 'array', 'items': string(format='binary'), 'minItems': 1, 'maxItems': 5}}, ['documents'])}}}
+    paths['/transactions/import/preview'] = {'post': preview}
+    paths['/transactions/import/commit'] = {'post': operation('Create approved statement transactions atomically', ref('StatementImportResult'), ref('StatementApproval'), 'post')}
+    for route in ('/ocr/test', '/transactions/import/preview'):
+        for code, description in [('415', 'Unsupported document format'), ('429', 'OCR Processor busy; retry manually'), ('502', 'OCR Processor failed or returned invalid output'), ('504', 'OCR Processor timed out')]:
+            paths[route]['post']['responses'][code] = {'description': description, 'content': {'application/json': {'schema': ref('Error')}}}
     paths['/imports/commit'] = {'post': operation('Commit a validated import preview', ref('ImportResult'), obj({'token': ID}, ['token']), 'post')}
     paths['/imports/preview']['post']['description'] = 'Preview is atomic and does not save imported records. Inspect errors and conflicts before committing the token; previews expire after 30 minutes and reject ledger changes since preview.'
     paths['/backups/status'] = {'get': operation('Read backup status (administrator)', ref('BackupStatus'))}

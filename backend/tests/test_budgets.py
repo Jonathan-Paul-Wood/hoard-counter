@@ -155,7 +155,7 @@ def test_report_allowances_are_cumulative_and_stop_at_report_end(household):
     create('budgets', dict(category_id=category['id'], amount='10', period='day', frequency=1, start_date='2026-01-01'))
     create('transactions', expense(account, category, '5', '2025-12-31'))
     create('transactions', expense(account, category, '20', '2026-01-05'))
-    other = create('accounts', dict(name='Savings', type='Savings', currency='USD'))
+    other = create('accounts', dict(name='Savings', type='Savings', currency='USD', opening_date='2025-01-01'))
     create('transactions', dict(type='Transfer', date='2026-01-03', source_account_id=account['id'], destination_account_id=other['id'], amount='50', description='Move cash', category_id=category['id']))
     data = client.get('/api/v1/reports/data?start=2026-01-03&end=2026-01-04').json
     snapshot = data['budgets'][0]

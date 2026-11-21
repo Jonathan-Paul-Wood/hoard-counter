@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from uuid import uuid4
 
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import event
+from sqlalchemy import event, DDL
 from sqlalchemy.engine import Engine
 
 db = SQLAlchemy()
@@ -47,6 +47,20 @@ class Record(db.Model):
     def to_dict(self):
         return {**self.data, "id": self.id, "revision": self.revision,
                 "last_modified": self.last_modified, "deleted": self.deleted}
+
+
+# SQLite JSON fields have no VARCHAR length enforcement. Triggers enforce the
+# same limits on inserts and updates without rebuilding this referenced table.
+RECORD_LIMIT_TRIGGERS = [f"""
+CREATE TRIGGER records_text_limits_{operation.lower()} BEFORE {operation} ON records
+WHEN (NEW.kind IN ('category', 'tag') AND
+      (json_type(NEW.data, '$.name') IS NOT 'text' OR length(json_extract(NEW.data, '$.name')) > 36))
+ OR (NEW.kind = 'category' AND json_type(NEW.data, '$.description') IS NOT NULL AND
+      (json_type(NEW.data, '$.description') IS NOT 'text' OR length(json_extract(NEW.data, '$.description')) > 120))
+BEGIN SELECT RAISE(ABORT, 'Category/tag text exceeds its field limits'); END
+""" for operation in ('INSERT', 'UPDATE')]
+for statement in RECORD_LIMIT_TRIGGERS:
+    event.listen(Record.__table__, 'after_create', DDL(statement).execute_if(dialect='sqlite'))
 
 
 class Posting(db.Model):

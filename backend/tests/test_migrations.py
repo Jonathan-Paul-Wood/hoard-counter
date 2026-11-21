@@ -15,8 +15,9 @@ from whc import create_app, migrations
 
 def test_migration_directory_has_exactly_one_head():
     scripts = ScriptDirectory.from_config(migrations.migration_config())
-    assert scripts.get_heads() == ["0005_merge_returns_budgets"]
-    assert set(scripts.get_revision("head").down_revision) == {
+    assert scripts.get_heads() == ["0006_category_text_limits"]
+    assert scripts.get_revision("head").down_revision == "0005_merge_returns_budgets"
+    assert set(scripts.get_revision("0005_merge_returns_budgets").down_revision) == {
         "0003_remove_returns", "0004_reset_budgets",
     }
     migrations.migration_files(scripts)
@@ -107,6 +108,36 @@ def test_managed_api_requires_the_deployment_to_apply_migrations(installation):
         assert connection.execute("SELECT version_num FROM alembic_version").fetchall() == [(migrations.schema_head(),)]
 
 
+def test_text_limit_migration_preserves_ids_references_and_audits_truncation(installation):
+    config, _, database, _ = installation
+    command.upgrade(config, '0005_merge_returns_budgets')
+    with sqlite3.connect(database) as connection:
+        for identity, kind, deleted in [('category', 'category', 0), ('tag', 'tag', 1)]:
+            connection.execute('INSERT INTO records VALUES (?, ?, ?, 7, ?, ?)',
+                (identity, kind, json.dumps({'name': 'x' * 45}), '2025-01-01T00:00:00Z', deleted))
+        connection.execute('INSERT INTO records VALUES (?, ?, ?, 1, ?, 0)',
+            ('reference', 'rule', json.dumps({'name': 'Rule', 'actions': {'category_id': 'category', 'tag_ids': ['tag']}}), '2025-01-01T00:00:00Z'))
+        for identity, kind in [('financial', 'account'), ('journal', 'transaction')]:
+            connection.execute('INSERT INTO records VALUES (?, ?, ?, 1, ?, 0)',
+                (identity, kind, '{}', '2025-01-01T00:00:00Z'))
+        connection.execute('INSERT INTO postings VALUES (?, ?, ?, ?, ?)', ('posting', 'journal', 'financial', '10', '10'))
+        old_postings = connection.execute('SELECT * FROM postings').fetchall()
+    command.upgrade(config, 'head')
+    with sqlite3.connect(database) as connection:
+        for identity in ('category', 'tag'):
+            data, revision = connection.execute('SELECT data, revision FROM records WHERE id = ?', (identity,)).fetchone()
+            assert json.loads(data)['name'] == 'x' * 36 and revision == 8
+            before, after = connection.execute('SELECT before, after FROM audit_events WHERE record_id = ?', (identity,)).fetchone()
+            assert json.loads(before)['name'] == 'x' * 45
+            assert json.loads(after)['name'] == 'x' * 36
+        assert connection.execute('SELECT deleted FROM records WHERE id = ?', ('tag',)).fetchone() == (1,)
+        assert json.loads(connection.execute('SELECT data FROM records WHERE id = ?', ('reference',)).fetchone()[0])['actions']['category_id'] == 'category'
+        assert connection.execute('SELECT * FROM postings').fetchall() == old_postings
+        assert connection.execute('PRAGMA foreign_key_check').fetchall() == []
+        with pytest.raises(sqlite3.IntegrityError):
+            connection.execute('UPDATE records SET data = ? WHERE id = ?', (json.dumps({'name': 'long' * 10}), 'tag'))
+
+
 @pytest.mark.parametrize("starting_revisions", [
     (),
     ("0002_migration_runs",),
@@ -133,10 +164,10 @@ def test_merge_upgrades_all_branch_states_and_audits_once(installation, starting
     for _ in range(2):
         app = create_app(app_config)
         assert app.test_client().get("/api/health").json == {
-            "status": "ok", "schema": "0005_merge_returns_budgets",
+            "status": "ok", "schema": "0006_category_text_limits",
         }
         with sqlite3.connect(database) as connection:
-            assert connection.execute("SELECT version_num FROM alembic_version").fetchall() == [("0005_merge_returns_budgets",)]
+            assert connection.execute("SELECT version_num FROM alembic_version").fetchall() == [("0006_category_text_limits",)]
             audits = connection.execute('SELECT * FROM "migration-runs" ORDER BY id').fetchall()
             names = connection.execute('SELECT migration_file FROM "migration-runs"').fetchall()
             assert len(names) == len(expected_files)
