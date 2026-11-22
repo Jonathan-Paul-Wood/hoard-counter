@@ -11,7 +11,7 @@ const row = (id, incoming, changes = {}) => ({
   sources: [{ filename: `${id}.pdf`, document: 1, page: 1 }],
   transaction: {
     type: incoming ? "Income" : "Expense",
-    date: incoming ? "2025-01-04" : "2025-01-01",
+    date: incoming ? "2025-01-31" : "2025-01-01",
     amount: incoming ? "10.00" : "10",
     currency: "USD",
     source_account_id: incoming ? "income" : "checking",
@@ -26,7 +26,7 @@ const row = (id, incoming, changes = {}) => ({
 });
 const financial = new Set(["checking", "savings"]);
 
-test("combining mirrors keeps outgoing date and both sources without mutating originals", () => {
+test("combining mirrors accepts exactly 30 days and keeps outgoing date and both sources", () => {
   const original = [row("a", false), row("b", true)];
   const snapshot = structuredClone(original);
   const result = combineTransfer(original, "b", "a", financial);
@@ -43,7 +43,7 @@ test("edited amounts, same accounts, distant dates and cross-currency pairs cann
   for (const changes of [
     { amount: "10.01" },
     { destination_account_id: "checking" },
-    { date: "2025-01-05" },
+    { date: "2025-02-01" }, // 31 days after the outgoing entry.
     { currency: "EUR" },
   ]) {
     const rows = [row("a", false), row("b", true, changes)];

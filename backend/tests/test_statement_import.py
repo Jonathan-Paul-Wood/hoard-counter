@@ -360,19 +360,29 @@ def test_saved_transfer_candidates_obey_amount_currency_date_and_direction(confi
         db.session.commit()
         accounts = {record.id: record.to_dict() for record in list_records('account')}
         incoming = dict(type='Income', source_account_id=system_id('income'), destination_account_id=other,
-            amount='12.5', currency='USD', date='2025-02-04', description='Incoming')
+            amount='12.5', currency='USD', date='2025-03-03', description='Incoming')  # Exactly 30 days.
         rows = importer.annotate([dict(id='pending', transaction=incoming)], accounts)
         assert rows[0]['existing_transfer_candidates'][0]['id'] == saved.id
-        for changes in ({'date': '2025-02-05'}, {'amount': '12.51'}, {'currency': 'EUR'},
+        for changes in ({'date': '2025-03-04'}, {'amount': '12.51'}, {'currency': 'EUR'},
                         {'destination_account_id': account}, {'type': 'Transfer'}):
             assert not importer.annotate([dict(id='pending', transaction={**incoming, **changes})], accounts)[0]['existing_transfer_candidates']
         outgoing = {**incoming, 'type': 'Expense', 'source_account_id': other, 'destination_account_id': system_id('expense')}
         assert not importer.annotate([dict(id='pending', transaction=outgoing)], accounts)[0]['existing_transfer_candidates']
+        pending_pair = [dict(id='outgoing', transaction=saved.data), dict(id='incoming', transaction=incoming)]
+        assert importer.annotate(pending_pair, accounts)[0]['transfer_candidates'] == ['incoming']
+        pending_pair[1]['transaction'] = {**incoming, 'date': '2025-03-04'}
+        assert not importer.annotate(pending_pair, accounts)[0]['transfer_candidates']
+        transfer = {**incoming, 'type': 'Transfer', 'source_account_id': account}
+        importer.validate_existing_transfer(transfer, saved, accounts)
+        with pytest.raises(ApiError, match='no longer matches'):
+            importer.validate_existing_transfer({**transfer, 'date': '2025-03-04'}, saved, accounts)
         saved.data = {**saved.data, 'type': 'Transfer', 'destination_account_id': other}
         db.session.commit()
         completed = importer.annotate([dict(id='pending', transaction=incoming)], accounts)[0]
         assert not completed['existing_transfer_candidates']
         assert completed['duplicate_ids'] == [saved.id]
+        outside_window = importer.annotate([dict(id='pending', transaction={**incoming, 'date': '2025-03-04'})], accounts)[0]
+        assert not outside_window['duplicate_ids']
 
 
 def test_saved_match_rejects_stale_revisions_double_use_and_changed_legs(configured, monkeypatch):
