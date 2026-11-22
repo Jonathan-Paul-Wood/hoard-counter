@@ -10,7 +10,7 @@ from sqlalchemy.exc import IntegrityError
 from test_admin_auth import household
 from whc import statement_import as importer
 from whc.ledger import save_record, list_records, system_id
-from whc.models import db, Record, AuditEvent
+from whc.models import db, Record, AuditEvent, Posting
 from whc.validation import ApiError
 
 
@@ -293,3 +293,164 @@ def test_rule_subscription_link_is_reviewed_and_can_be_removed(configured, monke
     with app.app_context():
         records = [r for r in list_records('transaction') if not r.data.get('system')]
         assert not records[0].data.get('subscription_id')
+
+
+def match_saved_row(row, candidate):
+    pending, saved = row['transaction'], candidate['transaction']
+    saved_outgoing = saved['type'] == 'Expense' and not saved.get('is_refund')
+    outgoing, incoming = (saved, pending) if saved_outgoing else (pending, saved)
+    row.update(existing_transaction_id=candidate['id'], existing_revision=candidate['revision'])
+    row['transaction'] = {**saved, 'type': 'Transfer', 'date': outgoing['date'],
+        'source_account_id': outgoing['source_account_id'], 'destination_account_id': incoming['destination_account_id'],
+        'amount': outgoing['amount'], 'currency': outgoing['currency'],
+        'destination_amount': incoming['amount'], 'destination_currency': incoming['currency'],
+        'is_refund': False, 'investment_fee': False, 'category_id': None, 'subscription_id': None, 'subscription_date': None}
+    row['existing_transfer_candidates'] = []
+    return row
+
+
+@pytest.mark.parametrize('saved_incoming', [False, True])
+def test_matches_saved_transactions_and_updates_without_double_counting(configured, monkeypatch, saved_incoming):
+    app, client, headers, _, _, (account, other, _) = configured
+    original_source = dict(filename='previous.pdf', document=1, page=3)
+    with app.app_context():
+        saved = save_record('transaction', dict(type='Income' if saved_incoming else 'Expense',
+            source_account_id=system_id('income') if saved_incoming else account,
+            destination_account_id=other if saved_incoming else system_id('expense'), amount='12.50',
+            currency='USD', date='2025-02-02', description='Saved bank entry', notes='Preserve notes',
+            merchant_reference='keep', import_sources=[original_source]), None)
+        db.session.add(Record(kind='attachment', data={'transaction_id': saved.id, 'filename': 'keep.pdf'}))
+        db.session.commit()
+        saved_id, saved_revision = saved.id, saved.revision
+    stub(monkeypatch, [extracted(account if saved_incoming else other, 'outgoing' if saved_incoming else 'incoming')])
+    result = preview(client, headers).json
+    row = result['rows'][0]
+    candidate = row['existing_transfer_candidates'][0]
+    assert candidate['id'] == saved_id and candidate['revision'] == saved_revision
+    assert row['transaction']['type'] != 'Transfer'  # Suggestions do not mutate either side.
+    with app.app_context():
+        assert db.session.get(Record, saved_id).data['type'] != 'Transfer'
+    match_saved_row(row, candidate)
+    response = approve(client, headers, result)
+    assert response.status_code == 200, response.json
+    assert response.json['created_count'] == 0 and response.json['updated_count'] == 1
+    assert response.json['transaction_ids'] == [saved_id]
+    assert approve(client, headers, result).json == response.json
+    with app.app_context():
+        records = [r for r in list_records('transaction') if not r.data.get('system')]
+        assert len(records) == 1
+        saved = db.session.get(Record, saved_id)
+        assert saved.revision == saved_revision + 1 and saved.data['type'] == 'Transfer'
+        assert saved.data['source_account_id'] == account and saved.data['destination_account_id'] == other
+        assert saved.data['notes'] == 'Preserve notes' and saved.data['merchant_reference'] == 'keep'
+        assert original_source in saved.data['import_sources'] and row['sources'][0] in saved.data['import_sources']
+        assert list_records('attachment')[0].data['transaction_id'] == saved_id
+        postings = list(db.session.scalars(db.select(Posting).where(Posting.transaction_id == saved_id)))
+        assert {posting.account_id for posting in postings} == {account, other}
+        assert sum(importer.decimal(posting.usd_amount) for posting in postings) == 0
+        audit = list(db.session.scalars(db.select(AuditEvent).where(AuditEvent.record_id == saved_id, AuditEvent.origin == 'statement-import')))
+        assert len(audit) == 1 and audit[0].before['type'] != 'Transfer' and audit[0].after['type'] == 'Transfer'
+
+
+def test_saved_transfer_candidates_obey_amount_currency_date_and_direction(configured):
+    app, _, _, _, _, (account, other, _) = configured
+    with app.app_context():
+        saved = save_record('transaction', dict(type='Expense', source_account_id=account,
+            destination_account_id=system_id('expense'), amount='12.50', currency='USD', date='2025-02-01', description='Saved'), None)
+        db.session.commit()
+        accounts = {record.id: record.to_dict() for record in list_records('account')}
+        incoming = dict(type='Income', source_account_id=system_id('income'), destination_account_id=other,
+            amount='12.5', currency='USD', date='2025-02-04', description='Incoming')
+        rows = importer.annotate([dict(id='pending', transaction=incoming)], accounts)
+        assert rows[0]['existing_transfer_candidates'][0]['id'] == saved.id
+        for changes in ({'date': '2025-02-05'}, {'amount': '12.51'}, {'currency': 'EUR'},
+                        {'destination_account_id': account}, {'type': 'Transfer'}):
+            assert not importer.annotate([dict(id='pending', transaction={**incoming, **changes})], accounts)[0]['existing_transfer_candidates']
+        outgoing = {**incoming, 'type': 'Expense', 'source_account_id': other, 'destination_account_id': system_id('expense')}
+        assert not importer.annotate([dict(id='pending', transaction=outgoing)], accounts)[0]['existing_transfer_candidates']
+        saved.data = {**saved.data, 'type': 'Transfer', 'destination_account_id': other}
+        db.session.commit()
+        completed = importer.annotate([dict(id='pending', transaction=incoming)], accounts)[0]
+        assert not completed['existing_transfer_candidates']
+        assert completed['duplicate_ids'] == [saved.id]
+
+
+def test_saved_match_rejects_stale_revisions_double_use_and_changed_legs(configured, monkeypatch):
+    app, client, headers, _, _, (account, other, _) = configured
+    with app.app_context():
+        saved = save_record('transaction', dict(type='Expense', source_account_id=account,
+            destination_account_id=system_id('expense'), amount='12.50', currency='USD', date='2025-02-01', description='Saved'), None)
+        db.session.commit()
+        saved_id = saved.id
+    stub(monkeypatch, [extracted(other, 'incoming')])
+    result = preview(client, headers).json
+    row = result['rows'][0]
+    match_saved_row(row, row['existing_transfer_candidates'][0])
+    original_amount = row['transaction']['amount']
+    row['transaction']['amount'] = row['transaction']['destination_amount'] = '14'
+    assert approve(client, headers, result).status_code == 409
+    row['transaction']['amount'] = row['transaction']['destination_amount'] = original_amount
+    duplicate = {**row, 'id': str(uuid4())}
+    result['rows'].append(duplicate)
+    assert approve(client, headers, result).status_code == 409
+    result['rows'].pop()
+    with app.app_context():
+        saved = db.session.get(Record, saved_id)
+        save_record('transaction', {'description': 'Concurrent edit'}, None, saved_id, saved.revision)
+        db.session.commit()
+    response = approve(client, headers, result)
+    assert response.status_code == 409 and response.json['error']['code'] == 'revision_conflict'
+    with app.app_context():
+        assert db.session.get(Record, saved_id).data['type'] == 'Expense'
+        assert db.session.get(Record, result['batch_id']) is None
+
+
+def test_saved_match_and_new_creation_are_atomic(configured, monkeypatch):
+    app, client, headers, _, _, (account, other, _) = configured
+    with app.app_context():
+        saved = save_record('transaction', dict(type='Expense', source_account_id=account,
+            destination_account_id=system_id('expense'), amount='12.50', currency='USD', date='2025-02-01', description='Saved'), None)
+        db.session.commit()
+        saved_id = saved.id
+    stub(monkeypatch, [extracted(other, 'incoming'), extracted(account, amount='20')])
+    result = preview(client, headers).json
+    match_saved_row(result['rows'][0], result['rows'][0]['existing_transfer_candidates'][0])
+    real_save = importer.save_record
+    def fail_create(*args, **kwargs):
+        if not kwargs.get('record_id'):
+            raise ApiError('Simulated save failure', 409)
+        return real_save(*args, **kwargs)
+    monkeypatch.setattr(importer, 'save_record', fail_create)
+    assert approve(client, headers, result).status_code == 409
+    with app.app_context():
+        assert db.session.get(Record, saved_id).data['type'] == 'Expense'
+        assert len([r for r in list_records('transaction') if not r.data.get('system')]) == 1
+        assert db.session.get(Record, result['batch_id']) is None
+
+
+def test_saved_income_matches_its_bank_currency_and_amount(configured, monkeypatch):
+    app, client, headers, *_ = configured
+    with app.app_context():
+        save_record('rate', dict(currency='EUR', date='2025-01-01', rate='1.25'), None)
+        sender = save_record('account', dict(name='Euro checking', type='Checking', currency='EUR',
+            opening_balance='0', opening_date='2025-01-01'), None)
+        receiver = save_record('account', dict(name='Euro savings', type='Savings', currency='EUR',
+            opening_balance='0', opening_date='2025-01-01'), None)
+        saved = save_record('transaction', dict(type='Income', source_account_id=system_id('income'),
+            destination_account_id=receiver.id, amount='12.50', currency='USD', destination_amount='10',
+            destination_currency='EUR', date='2025-02-01', description='Converted income'), None)
+        db.session.commit()
+        sender_id, receiver_id, saved_id = sender.id, receiver.id, saved.id
+    stub(monkeypatch, [extracted(sender_id, amount='10', currency='EUR')])
+    result = preview(client, headers).json
+    row = result['rows'][0]
+    candidate = row['existing_transfer_candidates'][0]
+    assert candidate['transaction']['amount'] == '10' and candidate['transaction']['currency'] == 'EUR'
+    match_saved_row(row, candidate)
+    response = approve(client, headers, result)
+    assert response.status_code == 200, response.json
+    with app.app_context():
+        saved = db.session.get(Record, saved_id)
+        assert saved.data['currency'] == saved.data['destination_currency'] == 'EUR'
+        assert saved.data['source_account_id'] == sender_id and saved.data['destination_account_id'] == receiver_id
+        assert importer.decimal(saved.data['amount']) == importer.decimal(saved.data['destination_amount']) == 10

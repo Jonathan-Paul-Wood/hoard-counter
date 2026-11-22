@@ -9,7 +9,10 @@ import type {
   StatementTransaction,
   StatementImportResult,
 } from "@/lib/generated";
-import { combineTransfer } from "@/lib/statement-import";
+import {
+  combineTransfer,
+  combineExistingTransfer,
+} from "@/lib/statement-import";
 import { Button, ErrorBox, Field, Modal, useApp } from "./ui";
 
 export function TransactionImport({ onClose }: { onClose: () => void }) {
@@ -93,7 +96,9 @@ export function TransactionImport({ onClose }: { onClose: () => void }) {
         },
       );
       notify(
-        `${result.total} ${result.total === 1 ? "transaction" : "transactions"} imported.`,
+        result.updated_count
+          ? `${result.created_count || 0} ${result.created_count === 1 ? "transaction" : "transactions"} created; ${result.updated_count} existing ${result.updated_count === 1 ? "transaction" : "transactions"} updated.`
+          : `${result.total} ${result.total === 1 ? "transaction" : "transactions"} imported.`,
       );
       refresh();
       onClose();
@@ -129,8 +134,10 @@ export function TransactionImport({ onClose }: { onClose: () => void }) {
       setBusy(false);
     }
   }
-  function merge(left: string, right: string) {
-    const next = combineTransfer(rows, left, right, financialIds);
+  function merge(left: string, right: string, existing = false) {
+    const next = existing
+      ? combineExistingTransfer(rows, left, right, financialIds)
+      : combineTransfer(rows, left, right, financialIds);
     if (next === rows) {
       setError(
         "These edited rows no longer match a transfer. Review their accounts, currencies, amounts, and dates.",
@@ -142,6 +149,10 @@ export function TransactionImport({ onClose }: { onClose: () => void }) {
     setError("");
   }
   const selected = rows.filter((row) => row.selected);
+  const updateCount = selected.filter(
+    (row) => row.existing_transaction_id,
+  ).length;
+  const createCount = selected.length - updateCount;
   const unacknowledgedDuplicates = selected.some((row) =>
     row.duplicate_ids?.some((id) => !row.acknowledged_duplicates?.includes(id)),
   );
@@ -149,7 +160,7 @@ export function TransactionImport({ onClose }: { onClose: () => void }) {
   return (
     <Modal
       title="Import Transactions"
-      subtitle="Extract bank statements, review every row, then approve creation."
+      subtitle="Extract bank statements, review every row, then approve the import."
       onClose={close}
       wide
       className="statement-import-modal"
@@ -210,7 +221,8 @@ export function TransactionImport({ onClose }: { onClose: () => void }) {
             <p className="notice">
               Review dates, amounts, accounts, and categories before approving.
               Possible duplicates start excluded. Transfer suggestions require
-              explicit combination.
+              explicit combination. Matching a saved transaction updates it into
+              a transfer when approved.
             </p>
             {preview.warnings.map((warning, i) => (
               <p className="muted small" key={i}>
@@ -506,6 +518,14 @@ export function TransactionImport({ onClose }: { onClose: () => void }) {
                                 {source.filename}, page {source.page}
                               </p>
                             ))}
+                            {row.existing_transaction_id && (
+                              <p className="notice small">
+                                Approval will update the matched saved
+                                transaction into a transfer instead of creating
+                                a new entry. Use Undo combine to cancel this
+                                match.
+                              </p>
+                            )}
                             {row.warnings?.map((warning, i) => (
                               <p className="small" key={i}>
                                 {warning}
@@ -561,6 +581,42 @@ export function TransactionImport({ onClose }: { onClose: () => void }) {
                                 )
                               );
                             })}
+                            {row.existing_transfer_candidates?.map(
+                              (candidate) => {
+                                const saved = candidate.transaction;
+                                const ownId = financialIds.has(
+                                  saved.source_account_id,
+                                )
+                                  ? saved.source_account_id
+                                  : saved.destination_account_id;
+                                const accountName =
+                                  accounts.find(
+                                    (account: Entity) => account.id === ownId,
+                                  )?.name || "Account";
+                                return (
+                                  <div key={candidate.id}>
+                                    <p className="small">
+                                      Saved: {saved.description} — {accountName}
+                                      , {saved.date}, {saved.amount}{" "}
+                                      {saved.currency}
+                                    </p>
+                                    <Button
+                                      variant="text"
+                                      disabled={rows.some(
+                                        (item) =>
+                                          item.existing_transaction_id ===
+                                          candidate.id,
+                                      )}
+                                      onClick={() =>
+                                        merge(row.id, candidate.id, true)
+                                      }
+                                    >
+                                      Match saved transaction
+                                    </Button>
+                                  </div>
+                                );
+                              },
+                            )}
                           </td>
                         </tr>
                       );
@@ -603,8 +659,11 @@ export function TransactionImport({ onClose }: { onClose: () => void }) {
                 }
                 onClick={approve}
               >
-                Create {selected.length}{" "}
-                {selected.length === 1 ? "transaction" : "transactions"}
+                {updateCount
+                  ? createCount
+                    ? `Create ${createCount} and update ${updateCount} transactions`
+                    : `Update ${updateCount} ${updateCount === 1 ? "transaction" : "transactions"}`
+                  : `Create ${selected.length} ${selected.length === 1 ? "transaction" : "transactions"}`}
               </Button>
             </div>
           </>

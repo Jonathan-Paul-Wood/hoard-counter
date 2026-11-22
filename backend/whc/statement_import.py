@@ -16,7 +16,7 @@ from flask import Blueprint, g, jsonify, request
 
 from .auth import login_required, admin_required
 from .models import db, Record
-from .ledger import (list_records, save_record, system_id, apply_transaction_rules,
+from .ledger import (list_records, get_record, save_record, system_id, apply_transaction_rules,
                      _validate_transaction, _validate_archived_transaction, _link_subscription)
 from .validation import ApiError, decimal, identifier, currency_definitions
 from .files import safe_filename
@@ -49,6 +49,50 @@ class NoRedirect(HTTPRedirectHandler):
         return None
 
 
+def processor_error_details(error, settings):
+    """Preserve bounded structured diagnostics, never a raw HTML/response body."""
+    token = settings.get('ocr_token') or ''
+
+    def clean(value, depth=0):
+        if depth > 8:
+            return '[truncated]'
+        if isinstance(value, str):
+            return (value.replace(token, '[redacted]') if token else value)[:2000]
+        if isinstance(value, dict):
+            return {clean(str(key), depth + 1): clean(item, depth + 1)
+                    for key, item in list(value.items())[:64]}
+        if isinstance(value, list):
+            return [clean(item, depth + 1) for item in value[:64]]
+        if value is None or isinstance(value, (bool, int)):
+            return value
+        if isinstance(value, float) and value == value and abs(value) != float('inf'):
+            return value
+        return None
+
+    details = {'processor_http_status': error.code}
+    request_id = error.headers.get('X-Request-ID') if error.headers else None
+    if request_id:
+        details['processor_request_id'] = clean(request_id)
+    try:
+        payload = error.read(64 * 1024 + 1)
+        if not payload:
+            details['error_response'] = 'empty'
+        elif len(payload) > 64 * 1024:
+            details['error_response'] = 'too_large'
+        else:
+            result = json.loads(payload)
+            upstream = result.get('error') if isinstance(result, dict) else None
+            if isinstance(upstream, dict):
+                details['processor_error'] = clean({key: upstream[key] for key in ('code', 'message', 'details') if key in upstream})
+            else:
+                details['error_response'] = 'unrecognized_envelope'
+    except (ValueError, TypeError, AttributeError, RecursionError, OSError, HTTPException):
+        details['error_response'] = 'unreadable_or_non_json'
+    finally:
+        error.close()
+    return details
+
+
 def processor_call(settings, path, body=None, content_type=None):
     headers = {'Accept': 'application/json'}
     if settings.get('ocr_token'):
@@ -74,7 +118,8 @@ def processor_call(settings, path, body=None, content_type=None):
                     429: 'OCR Processor is busy. Wait a few seconds and try again.',
                     503: 'OCR Processor extraction is not configured.', 504: 'OCR Processor timed out.'}
         raise ApiError(messages.get(exc.code, 'OCR Processor failed to analyze the documents. Check its configuration.'),
-                       429 if exc.code == 429 else 502, 'ocr_service_error') from None
+                       429 if exc.code == 429 else 502, 'ocr_service_error',
+                       details=processor_error_details(exc, settings)) from None
     except (socket.timeout, TimeoutError):
         raise ApiError('OCR Processor timed out. Try a smaller batch.', 504, 'ocr_timeout') from None
     except URLError:
@@ -172,9 +217,45 @@ def legs(transaction, accounts):
     return result
 
 
+def within_transfer_window(left, right):
+    try:
+        return abs((date.fromisoformat(left) - date.fromisoformat(right)).days) <= 30
+    except (ValueError, TypeError):
+        return False
+
+
+def transfer_match(left, right, accounts):
+    if left.get('type') == 'Transfer' or right.get('type') == 'Transfer':
+        return False
+    left_legs, right_legs = legs(left, accounts), legs(right, accounts)
+    if len(left_legs) != 1 or len(right_legs) != 1:
+        return False
+    a, b = left_legs[0], right_legs[0]
+    return (a[0] != b[0] and a[1] != b[1] and a[2:4] == b[2:4]
+            and a[3] > 0 and within_transfer_window(a[4], b[4]))
+
+
+def existing_candidate(record, accounts):
+    if record.deleted or record.data.get('system') or record.data.get('type') not in ('Income', 'Expense'):
+        return None
+    bank_legs = legs(record.data, accounts)
+    if len(bank_legs) != 1 or accounts[bank_legs[0][0]].get('closed_on'):
+        return None
+    leg = bank_legs[0]
+    # Express an incoming entry in its financial account's currency/amount,
+    # which may differ from its original income counterparty's currency.
+    transaction = {key: deepcopy(value) for key, value in record.data.items() if key in FIELDS}
+    transaction['notes'] = transaction.get('notes') or ''
+    transaction.update(amount=format(leg[3], 'f'), currency=leg[2],
+                       destination_amount=format(leg[3], 'f'), destination_currency=leg[2])
+    return dict(id=record.id, revision=record.revision, transaction=transaction,
+                sources=deepcopy(record.data.get('import_sources', [])))
+
+
 def annotate(rows, accounts):
-    existing = [(record.id, set(legs(record.data, accounts))) for record in list_records('transaction')
-                if not record.data.get('system')]
+    records = [record for record in list_records('transaction') if not record.data.get('system')]
+    existing = [(record.id, set(legs(record.data, accounts)), record.data.get('type') == 'Transfer') for record in records]
+    candidates = [candidate for record in records if (candidate := existing_candidate(record, accounts))]
     seen = {}
     for row in rows:
         for leg in legs(row['transaction'], accounts):
@@ -182,23 +263,33 @@ def annotate(rows, accounts):
     for row in rows:
         row['duplicate_ids'] = []
         row['transfer_candidates'] = []
+        row['existing_transfer_candidates'] = [candidate for candidate in candidates
+            if transfer_match(row['transaction'], candidate['transaction'], accounts)]
         for leg in legs(row['transaction'], accounts):
-            row['duplicate_ids'].extend(identity for identity, values in existing if leg in values)
+            row['duplicate_ids'].extend(identity for identity, values, completed_transfer in existing
+                if identity != row.get('existing_transaction_id') and (leg in values or
+                    (completed_transfer and any(leg[:4] == saved[:4] and within_transfer_window(leg[4], saved[4]) for saved in values))))
             row['duplicate_ids'].extend(identity for identity in seen.get(leg, []) if identity != row['id'])
         row['duplicate_ids'] = sorted(set(row['duplicate_ids']))
     for i, left in enumerate(rows):
         for right in rows[i + 1:]:
-            for a in legs(left['transaction'], accounts):
-                for b in legs(right['transaction'], accounts):
-                    try:
-                        matches = (a[0] != b[0] and a[1] != b[1] and a[2:4] == b[2:4]
-                                   and abs((date.fromisoformat(a[4]) - date.fromisoformat(b[4])).days) <= 3)
-                    except (ValueError, TypeError):
-                        matches = False
-                    if matches and left['transaction'].get('type') != 'Transfer' and right['transaction'].get('type') != 'Transfer':
-                        left['transfer_candidates'].append(right['id'])
-                        right['transfer_candidates'].append(left['id'])
+            if transfer_match(left['transaction'], right['transaction'], accounts):
+                left['transfer_candidates'].append(right['id'])
+                right['transfer_candidates'].append(left['id'])
     return rows
+
+
+def validate_existing_transfer(transaction, record, accounts):
+    candidate = existing_candidate(record, accounts)
+    old_legs = legs(record.data, accounts)
+    normalized = deepcopy(transaction)
+    _validate_transaction(normalized)
+    new_legs = legs(normalized, accounts)
+    if (not candidate or transaction.get('type') != 'Transfer' or len(new_legs) != 2
+            or any(leg[2:4] != old_legs[0][2:4] for leg in new_legs)
+            or not any(leg[:4] == old_legs[0][:4] for leg in new_legs)
+            or not within_transfer_window(transaction.get('date'), record.data.get('date'))):
+        raise ApiError('The saved transaction no longer matches this transfer. Undo the match and analyze again.', 409, 'transfer_conflict')
 
 
 def row_errors(transaction):
@@ -362,28 +453,52 @@ def commit():
                 valid = isinstance(value, str) or (field in ('category_id', 'subscription_id', 'subscription_date') and value is None)
             if not valid:
                 raise ApiError(f'Invalid {field} in reviewed transaction.')
+        existing = None
+        if row.get('existing_transaction_id') is not None:
+            existing_id = identifier(row['existing_transaction_id'])
+            existing = get_record('transaction', existing_id)
+            if type(row.get('existing_revision')) is not int or row['existing_revision'] != existing.revision:
+                raise ApiError('The saved transaction changed since preview. Undo the match and analyze again.', 409,
+                    'revision_conflict', {'row_id': identity, 'errors': ['The saved transaction changed since preview. Undo the match and analyze again.']})
+            try:
+                validate_existing_transfer(transaction, existing, accounts)
+            except ApiError as exc:
+                raise ApiError(exc.message, exc.status, exc.code, {'row_id': identity, 'errors': [exc.message]}) from None
+        elif row.get('existing_revision') is not None:
+            raise ApiError('A saved transaction ID is required with its revision.')
         errors = row_errors(transaction)
         if errors:
             raise ApiError('Correct the highlighted rows before approving.', 400, 'import_validation', {'row_id': identity, 'errors': errors})
         sources = [dict(filename=safe_filename(source['filename'], 'Document'), document=source['document'], page=source['page']) for source in sources]
-        clean_rows.append(dict(id=identity, transaction=transaction, sources=sources))
+        clean_rows.append(dict(id=identity, transaction=transaction, sources=sources,
+            existing_transaction_id=existing.id if existing else None, existing_revision=existing.revision if existing else None))
     if len({row['id'] for row in clean_rows}) != len(clean_rows):
         raise ApiError('Duplicate row identifiers.')
+    updated_ids = [row['existing_transaction_id'] for row in clean_rows if row['existing_transaction_id']]
+    if len(set(updated_ids)) != len(updated_ids):
+        raise ApiError('A saved transaction can only be matched once in a batch.', 409, 'transfer_conflict')
     annotate(clean_rows, accounts)
     conflicts = [dict(row_id=row['id'], duplicate_ids=row['duplicate_ids']) for row in clean_rows
                  if set(row['duplicate_ids']) - set(next((r.get('acknowledged_duplicates', []) for r in rows if r['id'] == row['id']), []))]
     if conflicts:
         raise ApiError('Possible duplicates need explicit approval.', 409, 'import_duplicates', {'rows': conflicts})
-    created = []
+    created, updated = [], []
     for row in clean_rows:
+        existing_id = row['existing_transaction_id']
+        if existing_id:
+            original_sources = get_record('transaction', existing_id).data.get('import_sources', [])
+            row['sources'] = list({json.dumps(source, sort_keys=True): source
+                                  for source in original_sources + row['sources']}.values())
         transaction = {**row['transaction'], 'import_sources': row['sources'], 'import_batch_id': batch_id}
         try:
-            record = save_record('transaction', transaction, g.user, origin='statement-import', apply_rules=False)
+            record = save_record('transaction', transaction, g.user, record_id=existing_id,
+                expected_revision=row['existing_revision'], origin='statement-import', apply_rules=False)
         except ApiError as exc:
             raise ApiError('An approved row could not be saved. Review the highlighted row.', exc.status,
                            'import_validation', {'row_id': row['id'], 'errors': [exc.message]}) from None
-        created.append(record.id)
-    result = dict(transaction_ids=created, total=len(created))
+        (updated if existing_id else created).append(record.id)
+    result = dict(transaction_ids=created + updated, total=len(created) + len(updated),
+                  created_count=len(created), updated_count=len(updated), updated_transaction_ids=updated)
     db.session.add(Record(id=batch_id, kind='statement_import', data=dict(actor_id=g.user.id, digest=digest, result=result)))
     db.session.commit()
     return jsonify(result)

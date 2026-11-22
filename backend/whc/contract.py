@@ -98,10 +98,11 @@ SCHEMAS.update({
     'OcrCapabilities': obj({'extraction_configured': {'type': 'boolean'}, 'ocr_available': {'type': 'boolean'}, 'formats': {'type': 'array', 'items': string()}, 'limits': obj({key: {'type': 'integer'} for key in ('files', 'upload_bytes', 'pages', 'pixels_per_page', 'text_chars', 'timeout_seconds')})}),
     'StatementSource': obj({'filename': string(maxLength=255), 'document': {'type': 'integer', 'minimum': 1}, 'page': {'type': 'integer', 'minimum': 1}}, ['filename', 'document', 'page']),
     'StatementTransaction': obj({**{key: string() for key in ('type', 'date', 'description', 'source_account_id', 'destination_account_id', 'amount', 'currency', 'destination_amount', 'destination_currency', 'notes')}, 'category_id': {'anyOf': [ID, {'type': 'null'}]}, 'tag_ids': {'type': 'array', 'items': ID}, 'is_refund': {'type': 'boolean'}, 'investment_fee': {'type': 'boolean'}}, ['type', 'date', 'description', 'source_account_id', 'destination_account_id', 'amount', 'currency']),
-    'StatementRow': obj({'id': ID, 'transaction': ref('StatementTransaction'), 'sources': {'type': 'array', 'items': ref('StatementSource')}, 'selected': {'type': 'boolean'}, **{key: {'type': 'array', 'items': string()} for key in ('warnings', 'errors', 'duplicate_ids', 'transfer_candidates', 'acknowledged_duplicates')}}, ['id', 'transaction', 'sources']),
+    'ExistingTransferCandidate': obj({'id': ID, 'revision': {'type': 'integer', 'minimum': 1}, 'transaction': ref('StatementTransaction'), 'sources': {'type': 'array', 'items': ref('StatementSource')}}, ['id', 'revision', 'transaction', 'sources']),
+    'StatementRow': obj({'id': ID, 'transaction': ref('StatementTransaction'), 'sources': {'type': 'array', 'items': ref('StatementSource')}, 'selected': {'type': 'boolean'}, 'existing_transfer_candidates': {'type': 'array', 'items': ref('ExistingTransferCandidate')}, 'existing_transaction_id': ID, 'existing_revision': {'type': 'integer', 'minimum': 1}, **{key: {'type': 'array', 'items': string()} for key in ('warnings', 'errors', 'duplicate_ids', 'transfer_candidates', 'acknowledged_duplicates')}}, ['id', 'transaction', 'sources']),
     'StatementPreview': obj({'batch_id': ID, 'rows': {'type': 'array', 'items': ref('StatementRow')}, 'warnings': {'type': 'array', 'items': string()}}, ['batch_id', 'rows', 'warnings']),
     'StatementApproval': obj({'batch_id': ID, 'rows': {'type': 'array', 'items': ref('StatementRow'), 'minItems': 1, 'maxItems': 500}}, ['batch_id', 'rows']),
-    'StatementImportResult': obj({'transaction_ids': {'type': 'array', 'items': ID}, 'total': {'type': 'integer'}}, ['transaction_ids', 'total']),
+    'StatementImportResult': obj({'transaction_ids': {'type': 'array', 'items': ID}, 'total': {'type': 'integer'}, 'created_count': {'type': 'integer'}, 'updated_count': {'type': 'integer'}, 'updated_transaction_ids': {'type': 'array', 'items': ID}}, ['transaction_ids', 'total']),
 })
 SCHEMAS['StatementTransaction']['properties'].update(subscription_id={'anyOf': [ID, {'type': 'null'}]}, subscription_date={'anyOf': [string(), {'type': 'null'}]})
 SCHEMAS['Transaction']['properties'].update(import_sources={'type': 'array', 'items': ref('StatementSource'), 'readOnly': True}, import_batch_id={**ID, 'readOnly': True})
@@ -212,7 +213,7 @@ def specification():
     preview = operation('Analyze bank statements without saving transactions', ref('StatementPreview'), method='post')
     preview['requestBody'] = {'required': True, 'content': {'multipart/form-data': {'schema': obj({'documents': {'type': 'array', 'items': string(format='binary'), 'minItems': 1, 'maxItems': 5}}, ['documents'])}}}
     paths['/transactions/import/preview'] = {'post': preview}
-    paths['/transactions/import/commit'] = {'post': operation('Create approved statement transactions atomically', ref('StatementImportResult'), ref('StatementApproval'), 'post')}
+    paths['/transactions/import/commit'] = {'post': operation('Apply approved statement creations and transfer updates atomically', ref('StatementImportResult'), ref('StatementApproval'), 'post')}
     for route in ('/ocr/test', '/transactions/import/preview'):
         for code, description in [('415', 'Unsupported document format'), ('429', 'OCR Processor busy; retry manually'), ('502', 'OCR Processor failed or returned invalid output'), ('504', 'OCR Processor timed out')]:
             paths[route]['post']['responses'][code] = {'description': description, 'content': {'application/json': {'schema': ref('Error')}}}

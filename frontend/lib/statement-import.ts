@@ -30,7 +30,7 @@ export function combineTransfer(
     !/^\d+(\.\d+)?$/.test(destination.amount) ||
     amountKey(source.amount) !== amountKey(destination.amount) ||
     !Number.isFinite(days) ||
-    days > 3 ||
+    days > 30 ||
     source.type === "Transfer" ||
     destination.type === "Transfer"
   )
@@ -64,6 +64,7 @@ export function combineTransfer(
     ],
     acknowledged_duplicates: [],
     transfer_candidates: [],
+    existing_transfer_candidates: [],
     errors: [],
   };
   return rows
@@ -78,4 +79,58 @@ export function combineTransfer(
             ),
           },
     );
+}
+
+export function combineExistingTransfer(
+  rows: StatementRow[],
+  rowId: string,
+  existingId: string,
+  financialIds: Set<string>,
+): StatementRow[] {
+  const row = rows.find((item) => item.id === rowId);
+  const candidate = row?.existing_transfer_candidates?.find(
+    (item) => item.id === existingId,
+  );
+  if (
+    !row ||
+    !candidate ||
+    rows.some((item) => item.existing_transaction_id === existingId)
+  )
+    return rows;
+  const saved: StatementRow = {
+    id: `existing-${candidate.id}`,
+    transaction: candidate.transaction,
+    sources: candidate.sources,
+  };
+  const combined = combineTransfer(
+    [row, saved],
+    row.id,
+    saved.id,
+    financialIds,
+  );
+  if (combined.length !== 1) return rows;
+  const merged: StatementRow = {
+    ...combined[0],
+    id: row.id,
+    existing_transaction_id: candidate.id,
+    existing_revision: candidate.revision,
+    transaction: {
+      ...combined[0].transaction,
+      description: candidate.transaction.description,
+      date: candidate.transaction.date,
+    },
+    duplicate_ids: combined[0].duplicate_ids?.filter(
+      (id) => id !== candidate.id,
+    ),
+  };
+  return rows.map((item) =>
+    item.id === rowId
+      ? merged
+      : {
+          ...item,
+          transfer_candidates: item.transfer_candidates?.filter(
+            (id) => id !== rowId,
+          ),
+        },
+  );
 }

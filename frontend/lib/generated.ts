@@ -93,13 +93,15 @@ export type StatementSource = { filename: string; document: number; page: number
 
 export type StatementTransaction = { type: string; date: string; description: string; source_account_id: string; destination_account_id: string; amount: string; currency: string; destination_amount?: string; destination_currency?: string; notes?: string; category_id?: string | null; tag_ids?: Array<string>; is_refund?: boolean; investment_fee?: boolean; subscription_id?: string | null; subscription_date?: string | null };
 
-export type StatementRow = { id: string; transaction: StatementTransaction; sources: Array<StatementSource>; selected?: boolean; warnings?: Array<string>; errors?: Array<string>; duplicate_ids?: Array<string>; transfer_candidates?: Array<string>; acknowledged_duplicates?: Array<string> };
+export type ExistingTransferCandidate = { id: string; revision: number; transaction: StatementTransaction; sources: Array<StatementSource> };
+
+export type StatementRow = { id: string; transaction: StatementTransaction; sources: Array<StatementSource>; selected?: boolean; existing_transfer_candidates?: Array<ExistingTransferCandidate>; existing_transaction_id?: string; existing_revision?: number; warnings?: Array<string>; errors?: Array<string>; duplicate_ids?: Array<string>; transfer_candidates?: Array<string>; acknowledged_duplicates?: Array<string> };
 
 export type StatementPreview = { batch_id: string; rows: Array<StatementRow>; warnings: Array<string> };
 
 export type StatementApproval = { batch_id: string; rows: Array<StatementRow> };
 
-export type StatementImportResult = { transaction_ids: Array<string>; total: number };
+export type StatementImportResult = { transaction_ids: Array<string>; total: number; created_count?: number; updated_count?: number; updated_transaction_ids?: Array<string> };
 
 export type AccountInput = { name: string; type: string; account_class?: "asset" | "liability" | "income" | "expense" | "equity"; currency?: string; opening_balance?: string; opening_date?: string; account_number?: string | null; description?: string; closed_on?: string | null; opening_currency?: string };
 

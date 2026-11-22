@@ -13081,9 +13081,9 @@
     },
     "/transactions/import/commit": {
       "post": {
-        "summary": "Create approved statement transactions atomically",
+        "summary": "Apply approved statement creations and transfer updates atomically",
         "responses": {
-          "201": {
+          "200": {
             "description": "Success",
             "content": {
               "application/json": {
@@ -15359,6 +15359,34 @@
           "currency"
         ]
       },
+      "ExistingTransferCandidate": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "revision": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "transaction": {
+            "$ref": "#/components/schemas/StatementTransaction"
+          },
+          "sources": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/StatementSource"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "revision",
+          "transaction",
+          "sources"
+        ]
+      },
       "StatementRow": {
         "type": "object",
         "properties": {
@@ -15377,6 +15405,20 @@
           },
           "selected": {
             "type": "boolean"
+          },
+          "existing_transfer_candidates": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ExistingTransferCandidate"
+            }
+          },
+          "existing_transaction_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "existing_revision": {
+            "type": "integer",
+            "minimum": 1
           },
           "warnings": {
             "type": "array",
@@ -15474,6 +15516,19 @@
           },
           "total": {
             "type": "integer"
+          },
+          "created_count": {
+            "type": "integer"
+          },
+          "updated_count": {
+            "type": "integer"
+          },
+          "updated_transaction_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "format": "uuid"
+            }
           }
         },
         "required": [
