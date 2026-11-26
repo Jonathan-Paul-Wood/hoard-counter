@@ -150,7 +150,7 @@ def specification():
             for method in ('patch', 'delete'):
                 paths['/' + plural + '/{id}'][method]['description'] = 'Administrator access is required. Built-in currency definitions are read-only.'
     paths['/transactions']['get']['parameters'].append({'name': 'include_system', 'in': 'query', 'schema': {'type': 'boolean', 'default': False}, 'description': 'Include opening, valuation, and reconciliation journals.'})
-    for resource, fields in [('transactions', ['description', 'date', 'category', 'account', 'amount']), ('valuations', ['account_id', 'date', 'amount'])]:
+    for resource, fields in [('transactions', ['description', 'date', 'category', 'account', 'amount']), ('valuations', ['account_id', 'date', 'amount']), ('subscriptions', ['name', 'amount', 'frequency', 'start_date', 'end_date', 'type'])]:
         paths['/' + resource]['get']['parameters'].extend([
             {'name': 'sort_by', 'in': 'query', 'schema': string(enum=fields), 'description': 'Sort all matching records before pagination. Account and category columns use their displayed names; amounts use signed native-currency values.'},
             {'name': 'sort_direction', 'in': 'query', 'schema': string(enum=['asc', 'desc'], default='asc')},

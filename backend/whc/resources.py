@@ -17,6 +17,7 @@ RESOURCE_KINDS = {"accounts": "account", "transactions": "transaction", "categor
 SORT_FIELDS = {
     'transaction': ('description', 'date', 'category', 'account', 'amount'),
     'valuation': ('account_id', 'date', 'amount'),
+    'subscription': ('name', 'amount', 'frequency', 'start_date', 'end_date', 'type'),
 }
 
 
@@ -40,6 +41,8 @@ def sort_records(records, kind, field, direction):
             return accounts.get(account_id, '—').casefold()
         if field == 'category':
             return categories.get(row.get('category_id'), 'Uncategorized').casefold()
+        if field == 'frequency':
+            return (row.get('frequency', '').casefold(), row.get('interval', 1))
         return str(row.get(field) or '').casefold()
 
     # Stable ID ordering keeps tied values consistent across pages.

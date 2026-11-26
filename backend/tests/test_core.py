@@ -73,6 +73,38 @@ def test_table_sorting_before_pagination_and_by_displayed_names(app):
         assert client.get('/api/v1/transactions', query_string=params).status_code == 400
 
 
+def test_subscription_sorting_all_columns_and_pagination(app):
+    client = app.test_client()
+    assert client.post('/api/v1/auth/setup', json={'username': 'owner', 'password': 'correct-horse-battery'}).status_code == 201
+    checking = account()
+    first = save_record('subscription', {
+        'name': 'alpha', 'amount': '2', 'type': 'Expense',
+        'source_account_id': checking.id, 'destination_account_id': system_id('expense'),
+        'frequency': 'monthly', 'interval': 2, 'start_date': '2025-01-01',
+    }, None)
+    second = save_record('subscription', {
+        'name': 'Zulu', 'amount': '10', 'type': 'Income',
+        'source_account_id': system_id('income'), 'destination_account_id': checking.id,
+        'frequency': 'monthly', 'interval': 10, 'start_date': '2025-02-01', 'end_date': '2025-12-01',
+    }, None)
+    db.session.commit()
+
+    for field in ('name', 'amount', 'frequency', 'start_date', 'end_date', 'type'):
+        for direction, expected in (('asc', [first.id, second.id]), ('desc', [second.id, first.id])):
+            response = client.get('/api/v1/subscriptions', query_string={'sort_by': field, 'sort_direction': direction})
+            assert response.status_code == 200
+            assert [row['id'] for row in response.json['items']] == expected, (field, direction)
+            for page, record_id in enumerate(expected, 1):
+                response = client.get('/api/v1/subscriptions', query_string={
+                    'sort_by': field, 'sort_direction': direction, 'page_size': 1, 'page': page,
+                })
+                assert response.status_code == 200
+                assert response.json['total'] == 2
+                assert [row['id'] for row in response.json['items']] == [record_id]
+    for params in ({'sort_by': 'invalid'}, {'sort_by': 'name', 'sort_direction': 'invalid'}):
+        assert client.get('/api/v1/subscriptions', query_string=params).status_code == 400
+
+
 @pytest.mark.parametrize("typ", INVESTMENT_TYPES)
 @pytest.mark.parametrize("amount", ["5", "-5", "0"])
 def test_returns_are_rejected(app, typ, amount):

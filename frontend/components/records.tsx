@@ -1398,8 +1398,9 @@ export function ResourceTable({
   const [sort, setSort] = useState<TableSort | null>(null);
   const [editor, setEditor] = useState<Entity | null | undefined>();
   const [removed, setRemoved] = useState<Entity | null>(null);
+  const sortable = ["valuations", "subscriptions"].includes(resource);
   const { data, loading, error } = useLoad<ListResult>(
-    `/${resource}?${query({ page, page_size: 25, sort_by: resource === "valuations" ? sort?.key : undefined, sort_direction: resource === "valuations" ? sort?.direction : undefined })}`,
+    `/${resource}?${query({ page, page_size: 25, sort_by: sortable ? sort?.key : undefined, sort_direction: sortable ? sort?.direction : undefined })}`,
     { items: [], total: 0, page: 1, page_size: 25 },
     version,
   );
@@ -1449,7 +1450,7 @@ export function ResourceTable({
               <thead>
                 <tr>
                   {columns.map((c) =>
-                    resource === "valuations" ? (
+                    sortable ? (
                       <SortHeader
                         key={c.key}
                         label={c.label}

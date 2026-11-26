@@ -3313,6 +3313,34 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "sort_by",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "name",
+                "amount",
+                "frequency",
+                "start_date",
+                "end_date",
+                "type"
+              ]
+            },
+            "description": "Sort all matching records before pagination. Account and category columns use their displayed names; amounts use signed native-currency values."
+          },
+          {
+            "name": "sort_direction",
+            "in": "query",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "asc",
+                "desc"
+              ],
+              "default": "asc"
+            }
           }
         ]
       },
