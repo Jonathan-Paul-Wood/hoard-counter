@@ -160,7 +160,7 @@ export function TransactionImport({ onClose }: { onClose: () => void }) {
   return (
     <Modal
       title="Import Transactions"
-      subtitle="Extract bank statements, review every row, then approve the import."
+      subtitle="Extract statements, CSV lists or receipts, review every row, then approve."
       onClose={close}
       wide
       className="statement-import-modal"
@@ -169,21 +169,21 @@ export function TransactionImport({ onClose }: { onClose: () => void }) {
         {!preview ? (
           <form onSubmit={analyze}>
             <Field
-              label="Bank statements"
-              hint="PDF, PNG, JPEG, TIFF or WebP. Up to five files and 20 MiB including extraction instructions; processor limits may be lower."
+              label="Statements, transaction lists or receipts"
+              hint="PDF, CSV, PNG, JPEG, TIFF or WebP. Up to five files and 20 MiB including account/category/rule context; processor limits may be lower."
             >
               <input
                 type="file"
                 multiple
                 required
                 disabled={busy}
-                accept="application/pdf,image/png,image/jpeg,image/tiff,image/webp,.pdf,.png,.jpg,.jpeg,.tif,.tiff,.webp"
+                accept="text/csv,.csv,application/pdf,image/png,image/jpeg,image/tiff,image/webp,.pdf,.png,.jpg,.jpeg,.tif,.tiff,.webp"
                 onChange={(e) => setFiles(Array.from(e.target.files || []))}
               />
             </Field>
             <p className="muted small">
-              Files and your account/category matching information will be sent
-              to the configured OCR Processor. Original statements are discarded
+              Files, account details, categories and rules will be sent to OCR
+              Processor and its SystemOne model. Original files are discarded
               after analysis.
             </p>
             {files.map((file, i) => (

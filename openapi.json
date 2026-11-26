@@ -15237,6 +15237,12 @@
       "OcrCapabilities": {
         "type": "object",
         "properties": {
+          "transaction_extraction_configured": {
+            "type": "boolean"
+          },
+          "systemone_configured": {
+            "type": "boolean"
+          },
           "extraction_configured": {
             "type": "boolean"
           },

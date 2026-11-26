@@ -39,8 +39,10 @@ def stub(monkeypatch, items):
     def call(settings, path, body=None, content_type=None):
         assert not db.session().in_transaction(), 'Network must not hold a database transaction'
         if path == '/v1/capabilities':
-            return dict(extraction_configured=True, ocr_available=True, limits={})
-        assert b'Known accounts:' in body and b'Groceries and dining' in body
+            return dict(transaction_extraction_configured=True, ocr_available=True, limits={})
+        assert path == '/v1/transactions'
+        assert b'context' in body and b'Groceries and dining' in body
+        assert b'output_format' in body and b'account_number' in body and b'description' in body and b'rules' in body
         assert content_type.startswith('multipart/form-data; boundary=')
         return dict(data=dict(transactions=items), warnings=['Review extracted values.'],
                     pages=[{'document': i, 'page': 1, 'text': 'private text'} for i in (1, 2)])
@@ -122,6 +124,46 @@ def test_rules_only_apply_before_user_review(configured, monkeypatch):
     assert approve(client, headers, result).status_code == 200
     with app.app_context():
         assert [r for r in list_records('transaction') if not r.data.get('system')][0].data['category_id'] is None
+
+
+def test_csv_systemone_contract_and_full_context(configured, monkeypatch):
+    from werkzeug.test import EnvironBuilder
+    from werkzeug.wrappers import Request
+    app, client, headers, _, _, (account, _, category) = configured
+    with app.app_context():
+        record = db.session.get(Record, account)
+        record.data = {**record.data, 'description': 'Daily household purchases'}
+        save_record('rule', dict(name='Market food', enabled=True, priority=1,
+            conditions=[dict(field='description', operator='contains', value='Market')], actions=dict(category_id=category)), None)
+        db.session.commit()
+
+    def call(settings, path, body=None, content_type=None):
+        assert not db.session().in_transaction()
+        if path == '/v1/capabilities':
+            return dict(transaction_extraction_configured=True, extraction_configured=False, limits={})
+        assert path == '/v1/transactions'
+        sent = Request(EnvironBuilder(method='POST', data=body, content_type=content_type).get_environ())
+        assert set(sent.form) == {'context', 'output_format'}
+        context = json.loads(sent.form['context'])
+        own = next(value for value in context['accounts'] if value['id'] == account)
+        assert own['description'] == 'Daily household purchases'
+        assert own['type'] == 'Checking' and own['account_number'] == '1234567890'
+        assert context['rules'][0]['actions']['category_id'] == category
+        assert json.loads(sent.form['output_format']) == importer.extraction_schema()
+        assert sent.files['documents'].read().startswith(b'Date,Description,Amount')
+        return dict(data=dict(transactions=[extracted(account)]), pages=[dict(document=1, page=1)], warnings=[])
+
+    monkeypatch.setattr(importer, 'processor_call', call)
+    result = preview(client, headers, [(io.BytesIO(b'Date,Description,Amount\n2025-02-01,Market,-12.50\n'), 'transactions.csv')])
+    assert result.status_code == 200, result.json
+    assert result.json['rows'][0]['sources'][0]['filename'] == 'transactions.csv'
+
+
+@pytest.mark.parametrize('payload', [b'junk', b'Date,Amount\n2026-11-15,12,34\n', b'Date,Amount\n2026-11-15,\x00\n'])
+def test_invalid_csv_upload_rejected(configured, monkeypatch, payload):
+    _, client, headers, *_ = configured
+    stub(monkeypatch, [])
+    assert preview(client, headers, [(io.BytesIO(payload), 'transactions.csv')]).status_code == 415
 
 
 def test_transfers_duplicates_and_new_duplicate_acknowledgment(configured, monkeypatch):
@@ -224,13 +266,13 @@ def test_category_limits_api_and_raw_database(configured):
 
 def test_service_limits_context_and_readiness(configured, monkeypatch):
     app, client, headers, *_ = configured
-    monkeypatch.setattr(importer, 'processor_call', lambda *args: dict(extraction_configured=False))
+    monkeypatch.setattr(importer, 'processor_call', lambda *args: dict(transaction_extraction_configured=False))
     assert client.post('/api/v1/ocr/test', headers=headers).status_code == 503
     assert preview(client, headers).status_code == 503
-    monkeypatch.setattr(importer, 'processor_call', lambda *args: dict(extraction_configured=True, limits={'files': 1, 'upload_bytes': 100}))
+    monkeypatch.setattr(importer, 'processor_call', lambda *args: dict(transaction_extraction_configured=True, limits={'files': 1, 'upload_bytes': 100}))
     assert preview(client, headers).status_code == 413  # Multipart and instructions count too.
     with app.app_context():
-        for i in range(110):
+        for i in range(400):
             save_record('category', dict(name=f'Category {i}', description='x' * 120), None)
         db.session.commit()
     def unexpected(*args):

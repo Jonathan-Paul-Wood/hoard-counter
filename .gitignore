@@ -1,5 +1,6 @@
 .venv/
 .venv-windows/
+.venv-codex/
 node_modules/
 .next/
 __pycache__/

@@ -4,7 +4,7 @@ const config: NextConfig = {
   output: "standalone",
   poweredByHeader: false,
   agentRules: false,
-  experimental: { proxyTimeout: 240000, proxyClientMaxBodySize: "100mb" },
+  experimental: { proxyTimeout: 1900000, proxyClientMaxBodySize: "100mb" },
   turbopack: { root: process.cwd() },
   async rewrites() {
     return [

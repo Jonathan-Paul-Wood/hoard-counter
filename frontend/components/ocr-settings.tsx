@@ -64,7 +64,7 @@ export function OcrSettings() {
         method: "POST",
       });
       setStatus(
-        `Connected. Structured extraction is ready.${result.ocr_available ? "" : " Native OCR is unavailable; scanned documents may fail."}`,
+        `Connected. SystemOne transaction extraction is ready.${result.ocr_available ? "" : " Native OCR is unavailable; scanned documents may fail."}`,
       );
     } catch (e) {
       setError(errorMessage(e));
@@ -77,7 +77,7 @@ export function OcrSettings() {
   return (
     <Panel
       title="OCR Processor"
-      subtitle="Connect an independently running OCR Processor to import bank statements."
+      subtitle="Connect an independently running OCR Processor to import statements, CSV lists and receipts."
     >
       <form
         className="panel-body"
@@ -134,9 +134,9 @@ export function OcrSettings() {
           )}
         </div>
         <p className="muted small">
-          Save changes before testing. Uploaded statements and account/category
-          matching information are sent to this service. Configure its
-          extraction model separately.
+          Save changes before testing. Uploaded files, account details,
+          categories and rules are sent to this service and its SystemOne model.
+          Configure its SystemOne connection separately.
         </p>
         {status && (
           <p className="notice" role="status">

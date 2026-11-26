@@ -87,7 +87,7 @@ export type ImportPreview = { token: string; summary: ImportSummary; changes: Ar
 
 export type ImportResult = { summary: ImportSummary; changes: Array<ImportChange> };
 
-export type OcrCapabilities = { extraction_configured?: boolean; ocr_available?: boolean; formats?: Array<string>; limits?: { files?: number; upload_bytes?: number; pages?: number; pixels_per_page?: number; text_chars?: number; timeout_seconds?: number } };
+export type OcrCapabilities = { transaction_extraction_configured?: boolean; systemone_configured?: boolean; extraction_configured?: boolean; ocr_available?: boolean; formats?: Array<string>; limits?: { files?: number; upload_bytes?: number; pages?: number; pixels_per_page?: number; text_chars?: number; timeout_seconds?: number } };
 
 export type StatementSource = { filename: string; document: number; page: number };
 
