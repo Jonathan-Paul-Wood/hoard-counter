@@ -956,6 +956,19 @@ export function Investments() {
     { items: [] },
     version,
   );
+  function updateFlow(
+    index: number,
+    changes: Record<string, string | undefined>,
+  ) {
+    setFlows((current) =>
+      current.map((flow, i) => (i === index ? { ...flow, ...changes } : flow)),
+    );
+  }
+  function tomorrow() {
+    const day = new Date(`${today()}T12:00:00`);
+    day.setDate(day.getDate() + 1);
+    return `${day.getFullYear()}-${String(day.getMonth() + 1).padStart(2, "0")}-${String(day.getDate()).padStart(2, "0")}`;
+  }
   const payload = () => ({
     date,
     assumptions: owned.map((a: Entity) => ({
@@ -1210,58 +1223,62 @@ export function Investments() {
                 <p className="muted small">
                   Positive amounts add money; negative amounts withdraw it.
                   Amounts are USD. Represent both sides of transfers between
-                  projected accounts.
+                  projected accounts. Recurring amounts apply on each scheduled
+                  date, including the end date, up to the projection horizon.
                 </p>
                 {flows.map((f, i) => (
                   <div className="flow-row" key={i}>
-                    <select
-                      aria-label="Flow account"
-                      required
-                      value={f.account_id}
-                      onChange={(e) =>
-                        setFlows(
-                          flows.map((v, j) =>
-                            i === j ? { ...v, account_id: e.target.value } : v,
-                          ),
-                        )
-                      }
-                    >
-                      <option value="">Select account…</option>
-                      {owned.map((a: Entity) => (
-                        <option key={a.id} value={a.id}>
-                          {a.name}
-                        </option>
-                      ))}
-                    </select>
-                    <input
-                      aria-label="Flow date"
-                      required
-                      type="date"
-                      min={today()}
-                      max={date}
-                      value={f.date}
-                      onChange={(e) =>
-                        setFlows(
-                          flows.map((v, j) =>
-                            i === j ? { ...v, date: e.target.value } : v,
-                          ),
-                        )
-                      }
-                    />
-                    <input
-                      aria-label="Flow amount in USD"
-                      required
-                      inputMode="decimal"
-                      placeholder="USD amount"
-                      value={f.amount}
-                      onChange={(e) =>
-                        setFlows(
-                          flows.map((v, j) =>
-                            i === j ? { ...v, amount: e.target.value } : v,
-                          ),
-                        )
-                      }
-                    />
+                    <Field label="Account">
+                      <select
+                        aria-label="Flow account"
+                        required
+                        value={f.account_id}
+                        onChange={(e) =>
+                          updateFlow(i, { account_id: e.target.value })
+                        }
+                      >
+                        <option value="">Select account…</option>
+                        {owned.map((a: Entity) => (
+                          <option key={a.id} value={a.id}>
+                            {a.name}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                    <Field label="Amount in USD">
+                      <input
+                        aria-label="Flow amount in USD"
+                        required
+                        inputMode="decimal"
+                        placeholder="USD amount"
+                        value={f.amount}
+                        onChange={(e) =>
+                          updateFlow(i, { amount: e.target.value })
+                        }
+                      />
+                    </Field>
+                    <Field label="Frequency">
+                      <select
+                        aria-label="Flow frequency"
+                        value={f.frequency || "once"}
+                        onChange={(e) =>
+                          updateFlow(i, {
+                            frequency: e.target.value,
+                            end_date:
+                              e.target.value === "once"
+                                ? undefined
+                                : f.end_date || date,
+                          })
+                        }
+                      >
+                        <option value="once">One time</option>
+                        <option value="daily">Daily</option>
+                        <option value="weekly">Weekly</option>
+                        <option value="monthly">Monthly</option>
+                        <option value="quarterly">Quarterly</option>
+                        <option value="yearly">Yearly</option>
+                      </select>
+                    </Field>
                     <button
                       type="button"
                       className="icon-button"
@@ -1270,6 +1287,52 @@ export function Investments() {
                     >
                       <Trash2 size={16} />
                     </button>
+                    <div className="flow-dates">
+                      <Field
+                        label={
+                          f.frequency && f.frequency !== "once"
+                            ? "Start date"
+                            : "Date"
+                        }
+                      >
+                        <input
+                          aria-label={
+                            f.frequency && f.frequency !== "once"
+                              ? "Flow start date"
+                              : "Flow date"
+                          }
+                          required
+                          type="date"
+                          min={
+                            !f.frequency || f.frequency === "once"
+                              ? tomorrow()
+                              : undefined
+                          }
+                          max={date}
+                          value={f.date}
+                          onChange={(e) =>
+                            updateFlow(i, { date: e.target.value })
+                          }
+                        />
+                      </Field>
+                      {f.frequency && f.frequency !== "once" && (
+                        <Field
+                          label="End date"
+                          hint="Includes this date; projection stops at your chosen horizon."
+                        >
+                          <input
+                            aria-label="Flow end date"
+                            required
+                            type="date"
+                            min={f.date}
+                            value={f.end_date || ""}
+                            onChange={(e) =>
+                              updateFlow(i, { end_date: e.target.value })
+                            }
+                          />
+                        </Field>
+                      )}
+                    </div>
                   </div>
                 ))}
                 <Button
@@ -1280,9 +1343,8 @@ export function Investments() {
                       ...flows,
                       {
                         account_id: "",
-                        date: new Date(Date.now() + 86400000)
-                          .toISOString()
-                          .slice(0, 10),
+                        date: tomorrow(),
+                        frequency: "once",
                         amount: "",
                       },
                     ])

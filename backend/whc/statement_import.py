@@ -336,6 +336,7 @@ def preview():
         'categories': [{key: value.get(key, '') for key in ('id', 'name', 'description')} for value in categories],
         'rules': [record.to_dict() for record in list_records('rule') if record.data.get('enabled', True)],
         'currencies': [{key: value[key] for key in ('code', 'precision')} for value in currencies],
+        'default_currency': 'USD',
     }
     if len(json.dumps(context)) > 64000 or len(accounts) > 254 or len(categories) > 254:
         raise ApiError('Account/category/rule context exceeds the processor limit. Reduce context before importing.', 413, 'ocr_context_limit')

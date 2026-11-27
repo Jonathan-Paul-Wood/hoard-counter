@@ -27,7 +27,7 @@ export type Currency = { id: string; revision: number; last_modified: string; de
 
 export type ProjectionAssumption = { account_id: string; mode: "manual" | "historical"; annual_rate?: string };
 
-export type PlannedFlow = { account_id: string; date: string; amount: string };
+export type PlannedFlow = { account_id: string; date: string; amount: string; frequency?: "once" | "daily" | "weekly" | "monthly" | "quarterly" | "yearly"; end_date?: string };
 
 export type ProjectionRequest = { date: string; assumptions?: Array<ProjectionAssumption>; flows?: Array<PlannedFlow> };
 

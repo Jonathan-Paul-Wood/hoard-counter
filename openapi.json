@@ -14368,12 +14368,30 @@
           },
           "date": {
             "type": "string",
-            "format": "date"
+            "format": "date",
+            "description": "Movement date, or the anchored start date for recurring movements."
           },
           "amount": {
             "type": "string",
             "pattern": "^-?\\d+(\\.\\d+)?$",
             "description": "Exact decimal string. Never send a JSON floating-point number."
+          },
+          "frequency": {
+            "type": "string",
+            "enum": [
+              "once",
+              "daily",
+              "weekly",
+              "monthly",
+              "quarterly",
+              "yearly"
+            ],
+            "default": "once"
+          },
+          "end_date": {
+            "type": "string",
+            "format": "date",
+            "description": "Required for recurring movements; inclusive. Occurrences are capped at the projection horizon."
           }
         },
         "required": [

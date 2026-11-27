@@ -1829,9 +1829,25 @@ td strong {
 }
 .flow-row {
   display: grid;
-  grid-template-columns: 1.3fr 1fr 1fr 28px;
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) minmax(0, 1fr) 28px;
   gap: 10px;
-  margin: 11px 0;
+  margin: 16px 0;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+  align-items: start;
+}
+.flow-row .field {
+  min-width: 0;
+  margin: 0;
+}
+.flow-row > .icon-button {
+  margin-top: 25px;
+}
+.flow-dates {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
 }
 .flow-row select,
 .flow-row input {
@@ -2473,6 +2489,9 @@ td strong {
   }
   .flow-row .icon-button {
     justify-self: end;
+  }
+  .flow-dates {
+    grid-template-columns: 1fr;
   }
   .auth-story {
     padding: 35px;

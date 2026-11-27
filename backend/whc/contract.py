@@ -33,7 +33,7 @@ SCHEMAS = {
     'Scenario': obj({**META, 'name': string(), 'date': DAY, 'assumptions': {'type': 'array', 'items': ref('ProjectionAssumption')}, 'flows': {'type': 'array', 'items': ref('PlannedFlow')}}, ['id', 'revision', 'last_modified', 'name']),
     'Currency': obj({**META, 'code': string(pattern='^[A-Z]{3}$'), 'name': string(), 'precision': {'type': 'integer', 'minimum': 0, 'maximum': 18}}, ['id', 'revision', 'last_modified', 'code', 'name', 'precision']),
     'ProjectionAssumption': obj({'account_id': ID, 'mode': string(enum=['manual', 'historical']), 'annual_rate': MONEY}, ['account_id', 'mode']),
-    'PlannedFlow': obj({'account_id': ID, 'date': DAY, 'amount': MONEY}, ['account_id', 'date', 'amount']),
+    'PlannedFlow': obj({'account_id': ID, 'date': string(format='date', description='Movement date, or the anchored start date for recurring movements.'), 'amount': MONEY, 'frequency': string(enum=['once', 'daily', 'weekly', 'monthly', 'quarterly', 'yearly'], default='once'), 'end_date': string(format='date', description='Required for recurring movements; inclusive. Occurrences are capped at the projection horizon.')}, ['account_id', 'date', 'amount']),
     'ProjectionRequest': obj({'date': DAY, 'assumptions': {'type': 'array', 'items': ref('ProjectionAssumption')}, 'flows': {'type': 'array', 'items': ref('PlannedFlow')}}, ['date']),
     'User': obj({'id': ID, 'username': string(), 'role': string(enum=['admin', 'member']), 'active': {'type': 'boolean'}}, ['id', 'username', 'role']),
     'Session': obj({'user': {'anyOf': [ref('User'), {'type': 'null'}]}, 'csrf_token': string(), 'setup_required': {'type': 'boolean'}}, ['user', 'csrf_token', 'setup_required']),

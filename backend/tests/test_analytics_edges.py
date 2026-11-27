@@ -6,7 +6,7 @@ import pytest
 from whc import create_app
 from whc.models import db
 from whc.ledger import save_record, void_record, system_id, reconcile_account
-from whc.analytics import performance, forecast, balance_summary, project, transaction_records
+from whc.analytics import performance, forecast, balance_summary, project, transaction_records, planned_flow_occurrences
 from whc.reports import report_data
 from whc.validation import ApiError
 
@@ -192,6 +192,61 @@ def test_projection_signed_flows_and_end_of_day_timing(household):
     growing = project({'date': '2027-01-01', 'assumptions': [{'account_id': portfolio.id, 'annual_rate': '0.1'}],
                        'flows': [{'account_id': portfolio.id, 'date': '2027-01-01', 'amount': '5.00'}]})
     assert D(growing['total']) == D(100) * D('1.1') ** (D(365) / D('365.25')) + 5
+
+
+@pytest.mark.parametrize(('frequency', 'start', 'end', 'expected'), [
+    ('daily', '2026-01-02', '2026-01-04', ['2026-01-02', '2026-01-03', '2026-01-04']),
+    ('weekly', '2026-01-02', '2026-01-16', ['2026-01-02', '2026-01-09', '2026-01-16']),
+    ('monthly', '2026-01-31', '2026-04-30', ['2026-01-31', '2026-02-28', '2026-03-31', '2026-04-30']),
+    ('quarterly', '2026-01-31', '2026-07-31', ['2026-01-31', '2026-04-30', '2026-07-31']),
+    ('yearly', '2028-02-29', '2032-02-29', ['2028-02-29', '2029-02-28', '2030-02-28', '2031-02-28', '2032-02-29']),
+])
+def test_planned_flow_frequencies_are_anchored_and_end_inclusive(frequency, start, end, expected):
+    flows = planned_flow_occurrences([dict(account_id='portfolio', date=start, end_date=end,
+                                          frequency=frequency, amount='10')], date(2026, 1, 1), date(2033, 1, 1))
+    assert [flow['date'] for flow in flows] == expected
+
+
+def test_recurring_projection_matches_dated_flows_and_saved_scenario(household):
+    portfolio = account()
+    body = dict(date='2026-05-15', assumptions=[dict(account_id=portfolio.id, annual_rate='0.12')], flows=[
+        dict(account_id=portfolio.id, date='2025-12-31', end_date='2026-06-30', frequency='monthly', amount='20'),
+        dict(account_id=portfolio.id, date='2026-02-28', end_date='2026-03-31', frequency='monthly', amount='-5'),
+        dict(account_id=portfolio.id, date='2026-05-15', amount='7'),
+    ])
+    scenario = save_record('scenario', dict(name='Recurring plan', **body), None)
+    result = project(scenario.data)
+    explicit = [dict(account_id=portfolio.id, date=day, amount=amount) for day, amount in [
+        ('2026-01-31', '20'), ('2026-02-28', '20'), ('2026-03-31', '20'), ('2026-04-30', '20'),
+        ('2026-02-28', '-5'), ('2026-03-28', '-5'), ('2026-05-15', '7'),
+    ]]
+    assert result == project({**body, 'flows': explicit})
+    assert D(result['series'][0]['total']) == 100
+    assert scenario.data['flows'] == body['flows']
+
+
+@pytest.mark.parametrize('changes', [
+    {'frequency': 'unsupported'}, {'end_date': None}, {'end_date': 'invalid'},
+    {'end_date': '2026-01-01'}, {'date': '2028-01-01', 'end_date': '2028-02-01'},
+    {'amount': 'NaN'},
+])
+def test_recurring_projection_validates_schedule(household, changes):
+    portfolio = account()
+    flow = dict(account_id=portfolio.id, date='2026-01-31', end_date='2026-12-31', frequency='monthly', amount='10')
+    with pytest.raises((ValueError, ApiError)):
+        project(dict(date='2027-01-01', flows=[{**flow, **changes}]))
+
+
+def test_recurring_flows_skip_today_and_expired_schedules():
+    flow = dict(account_id='portfolio', date='2025-12-01', end_date='2026-02-01', frequency='monthly', amount='10')
+    assert [f['date'] for f in planned_flow_occurrences([flow], date(2026, 1, 1), date(2026, 3, 1))] == ['2026-02-01']
+    assert planned_flow_occurrences([flow], date(2026, 2, 1), date(2026, 3, 1)) == []
+
+
+def test_recurring_flows_enforce_combined_occurrence_limit():
+    flow = dict(account_id='portfolio', date='2026-01-02', end_date='2045-01-01', frequency='daily', amount='1')
+    with pytest.raises(ValueError, match='10000 planned flow occurrences'):
+        planned_flow_occurrences([flow, flow], date(2026, 1, 1), date(2045, 1, 1))
 
 
 @pytest.mark.parametrize('bad', ['NaN', 'Infinity', '-Infinity', True, 0.2, '1e9999', None])

@@ -407,6 +407,33 @@ def get_performance():
     return jsonify(performance(request.args['account_id']))
 
 
+def planned_flow_occurrences(flows, current_date, target):
+    """Expand schedules into dated flows before applying end-of-day growth."""
+    expanded = []
+    for flow in flows:
+        start = date.fromisoformat(date_string(flow.get('date'), 'flow date'))
+        input_amount(flow.get('amount'), 'USD', 'flow amount')
+        frequency = flow.get('frequency', 'once')
+        if frequency == 'once':
+            if not current_date < start <= target:
+                raise ValueError('Planned flows must fall after today and on or before the target date.')
+            days = [start]
+        else:
+            if frequency not in ('daily', 'weekly', 'monthly', 'quarterly', 'yearly'):
+                raise ValueError('Choose a supported planned flow frequency.')
+            end = date.fromisoformat(date_string(flow.get('end_date'), 'flow end date'))
+            if end < start:
+                raise ValueError('Planned flow end date must be on or after its start date.')
+            if start > target:
+                raise ValueError('Planned flow start date must be on or before the target date.')
+            days = occurrences(dict(start_date=start.isoformat(), end_date=end.isoformat(), frequency=frequency),
+                               current_date + timedelta(days=1), target)
+        if len(expanded) + len(days) > 10000:
+            raise ValueError('Projection supports at most 10000 planned flow occurrences.')
+        expanded.extend(dict(account_id=flow['account_id'], date=day.isoformat(), amount=flow['amount']) for day in days)
+    return expanded
+
+
 def project(body):
     if not isinstance(body, dict):
         raise ValueError('Projection request must be an object.')
@@ -442,10 +469,7 @@ def project(body):
     valid_ids = {r['id'] for r in balances['accounts']}
     if set(assumptions) - valid_ids or any(f.get('account_id') not in valid_ids for f in flows):
         raise ValueError('Projection accounts must be active assets or liabilities.')
-    for flow in flows:
-        if not current_date < date.fromisoformat(date_string(flow.get('date'), 'flow date')) <= target:
-            raise ValueError('Planned flows must fall after today and on or before the target date.')
-        input_amount(flow.get('amount'), 'USD', 'flow amount')
+    flows = planned_flow_occurrences(flows, current_date, target)
     for row in balances['accounts']:
         if row['balance_usd'] is None:
             continue

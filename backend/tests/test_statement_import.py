@@ -42,6 +42,7 @@ def stub(monkeypatch, items):
             return dict(transaction_extraction_configured=True, ocr_available=True, limits={})
         assert path == '/v1/transactions'
         assert b'context' in body and b'Groceries and dining' in body
+        assert b'"default_currency": "USD"' in body
         assert b'output_format' in body and b'account_number' in body and b'description' in body and b'rules' in body
         assert content_type.startswith('multipart/form-data; boundary=')
         return dict(data=dict(transactions=items), warnings=['Review extracted values.'],
