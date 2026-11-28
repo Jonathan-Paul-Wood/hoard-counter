@@ -46,6 +46,9 @@ def jobs(configured, monkeypatch):
             if state.get('bad'):
                 result['data']['transactions'][0]['document'] = 2
             response['files'] = [dict(job_id=files[0]['job_id'], run_id=files[0]['run_id'], result=result, error=None)]
+            if state.get('file_failed'):
+                response['jobs'] = [{**file, 'state': 'failed', 'status': 'completed'} for file in files]
+                response['files'][0].update(result=None, error=dict(message='Extraction failed'))
         return response
     monkeypatch.setattr(imports, 'processor_call', call)
     # capabilities_for belongs to the synchronous module.
@@ -152,6 +155,76 @@ def test_malformed_result_never_acknowledged_or_partially_saved(jobs):
     assert result['rows'] == []
     assert result['jobs'][0]['state'] == 'failed'
     assert not any(path.endswith('/ack') for path in state['calls'])
+
+
+@pytest.mark.parametrize('file_failed', [False, True])
+def test_clear_failed_import_removes_persisted_job(jobs, file_failed):
+    (app, client, headers, member, mh, _), state = jobs
+    identity = submit(client, headers)
+    state.update(ready=True, bad=not file_failed, file_failed=file_failed)
+    collect(app, identity)
+    if file_failed:
+        collect(app, identity)
+    assert review(client)['jobs'][0]['state'] == ('completed' if file_failed else 'failed')
+    assert review(client)['rows'] == []
+    response = member.delete(f'/api/v1/transactions/import/jobs/{identity}', headers=mh)
+    assert response.status_code == 200, response.json
+    assert response.json == {'cleared': True}
+    assert review(client)['jobs'] == []
+    assert client.get('/api/v1/transactions/import/summary').json['jobs'] == []
+    with app.app_context():
+        assert db.session.get(Record, identity) is None
+        assert not imports.collect_one()
+    # Failed files have no ingestion receipt preventing a retry.
+    submit(client, headers)
+
+
+def test_clear_completed_job_preserves_drafts_and_ingestion_receipts(jobs):
+    (app, client, headers, _, _, _), state = jobs
+    identity = submit(client, headers)
+    state['ready'] = True
+    collect(app, identity)
+    collect(app, identity)
+    rows = review(client)['rows']
+    assert client.delete(f'/api/v1/transactions/import/jobs/{identity}', headers=headers).status_code == 200
+    assert review(client)['rows'] == rows
+    with app.app_context():
+        assert db.session.get(Record, identity) is None
+        assert len(list_records('ocr_ingestion')) == 1
+
+
+@pytest.mark.parametrize('job_state', ['processing', 'delayed', 'ack_pending'])
+def test_cannot_clear_unfinished_import(jobs, job_state):
+    (app, client, headers, _, _, _), state = jobs
+    identity = submit(client, headers)
+    with app.app_context():
+        record = db.session.get(Record, identity)
+        record.data = {**record.data, 'state': job_state}
+        db.session.commit()
+    assert client.delete(f'/api/v1/transactions/import/jobs/{identity}', headers=headers).status_code == 409
+    assert len(review(client)['jobs']) == 1
+
+
+def test_clear_cancelled_job_while_collection_is_in_flight(jobs):
+    (app, client, headers, _, _, _), state = jobs
+    identity = submit(client, headers)
+    state['ready'] = True
+    def clear_in_flight():
+        record = db.session.get(Record, identity)
+        record.data = {**record.data, 'state': 'cancelled'}
+        db.session.commit()
+        assert client.delete(f'/api/v1/transactions/import/jobs/{identity}', headers=headers).status_code == 200
+    state['on_result'] = clear_in_flight
+    collect(app, identity)
+    assert review(client)['jobs'] == []
+    assert review(client)['rows'] == []
+
+
+def test_clear_job_requires_csrf_and_rejects_unrelated_records(jobs):
+    (app, client, headers, _, _, (account, _, _)), state = jobs
+    assert client.delete(f'/api/v1/transactions/import/jobs/{account}').status_code == 403
+    assert client.delete(f'/api/v1/transactions/import/jobs/{account}', headers=headers).status_code == 404
+    assert client.delete(f'/api/v1/transactions/import/jobs/{uuid4()}', headers=headers).status_code == 404
 
 
 def test_invalid_accepted_row_does_not_delete_draft(jobs):

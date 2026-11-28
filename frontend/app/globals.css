@@ -3090,6 +3090,31 @@ th {
 .statement-import-body {
   padding: 0 28px 20px;
 }
+.import-job-progress {
+  display: flex;
+  align-items: baseline;
+  gap: 0.65rem;
+}
+.import-step-dots {
+  display: inline-flex;
+  gap: 5px;
+  flex-shrink: 0;
+}
+.import-step-dot {
+  width: 9px;
+  height: 9px;
+  border: 1px solid var(--muted);
+  border-radius: 50%;
+  background: transparent;
+}
+.import-step-dot.running {
+  border-color: #2563eb;
+  background: #2563eb;
+}
+.import-step-dot.complete {
+  border-color: var(--green);
+  background: var(--green);
+}
 .import-badge {
   display: inline-flex;
   align-items: center;

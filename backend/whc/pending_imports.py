@@ -157,6 +157,19 @@ def cancel(identity):
     return jsonify(public_job(record))
 
 
+@bp.delete('/transactions/import/jobs/<identity>')
+@login_required
+def clear_job(identity):
+    record = db.session.get(Record, identifier(identity))
+    if record is None or record.kind != 'ocr_import_job':
+        raise ApiError('Import not found.', 404)
+    if record.data['state'] not in ('completed', 'failed', 'cancelled'):
+        raise ApiError('Only finished imports can be cleared.', 409)
+    db.session.delete(record)
+    db.session.commit()
+    return jsonify(cleared=True)
+
+
 def check_revision(item, row):
     if item is None:
         raise ApiError('A pending transaction was already saved or deleted. Reload Review Imports.', 409, 'revision_conflict')
@@ -295,7 +308,7 @@ def collect_one(now=None):
         error = exc
     with collector_write():
         job = db.session.get(Record, identity)
-        if job.data.get('lease') != lease or job.data['state'] == 'cancelled':
+        if job is None or job.data.get('lease') != lease or job.data['state'] == 'cancelled':
             return True
         update = deepcopy(job.data)
         update['lease_until'] = 0

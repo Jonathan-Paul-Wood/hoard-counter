@@ -10,12 +10,53 @@ import type {
   StatementImportResult,
   PendingReview,
   ImportJob,
+  ImportJobFile,
 } from "@/lib/generated";
 import {
   combineTransfer,
   combineExistingTransfer,
 } from "@/lib/statement-import";
 import { Button, ErrorBox, Field, Modal, useApp } from "./ui";
+
+const importSteps = [
+  "processing_file",
+  "extracting_transactions",
+  "identifying_accounts",
+  "determining_categories",
+] as const;
+
+function ImportStepDots({
+  file,
+  active,
+}: {
+  file: ImportJobFile;
+  active: boolean;
+}) {
+  const current = importSteps.findIndex((step) => step === file.status);
+  return (
+    <span className="import-step-dots" aria-hidden="true">
+      {importSteps.map((step, index) => {
+        const complete =
+          file.state !== "queued" &&
+          (file.state === "succeeded" ||
+            file.status === "completed" ||
+            index < current ||
+            (index === current &&
+              file.state === "running" &&
+              file.total !== null &&
+              file.completed >= file.total));
+        const running =
+          !complete && active && file.state === "running" && index === current;
+        return (
+          <span
+            key={step}
+            className={`import-step-dot${complete ? " complete" : running ? " running" : ""}`}
+          />
+        );
+      })}
+    </span>
+  );
+}
 
 export function TransactionImport({
   onClose,
@@ -246,6 +287,19 @@ export function TransactionImport({
       setError(errorMessage(e));
     }
   }
+  async function clearJob(id: string) {
+    setBusy(true);
+    setError("");
+    try {
+      await api(`/transactions/import/jobs/${id}`, { method: "DELETE" });
+      await loadReview();
+      refresh();
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy(false);
+    }
+  }
   function removeDraft(id: string) {
     hidden.current.add(id);
     setRows((current) => current.filter((row) => row.id !== id));
@@ -328,19 +382,25 @@ export function TransactionImport({
                 {job.files.length} files completed
               </span>
               {job.files.map((file) => (
-                <p className="small" key={file.run_id}>
-                  {file.filename}:{" "}
-                  {file.state === "queued"
-                    ? "Queued"
-                    : file.state === "failed"
-                      ? "Failed"
-                      : file.status.replaceAll("_", " ")}
-                  {file.state !== "failed" &&
-                    ` — ${file.completed}/${file.total ?? "?"}`}
-                  {file.error != null &&
-                    typeof file.error === "object" &&
-                    "message" in file.error &&
-                    ` — ${String(file.error.message)}`}
+                <p className="small import-job-progress" key={file.run_id}>
+                  <ImportStepDots
+                    file={file}
+                    active={["processing", "delayed"].includes(job.state)}
+                  />
+                  <span>
+                    {file.filename}:{" "}
+                    {file.state === "queued"
+                      ? "Queued"
+                      : file.state === "failed"
+                        ? "Failed"
+                        : file.status.replaceAll("_", " ")}
+                    {file.state !== "failed" &&
+                      ` — ${file.completed}/${file.total ?? "?"}`}
+                    {file.error != null &&
+                      typeof file.error === "object" &&
+                      "message" in file.error &&
+                      ` — ${String(file.error.message)}`}
+                  </span>
                 </p>
               ))}
               {job.error && <p role="alert">{job.error}</p>}
@@ -350,9 +410,19 @@ export function TransactionImport({
               {job.state === "delayed" && (
                 <Button
                   variant="secondary"
+                  disabled={busy}
                   onClick={() => void cancelChecks(job.id)}
                 >
                   Cancel checks
+                </Button>
+              )}
+              {["completed", "failed", "cancelled"].includes(job.state) && (
+                <Button
+                  variant="secondary"
+                  disabled={busy}
+                  onClick={() => void clearJob(job.id)}
+                >
+                  Clear status
                 </Button>
               )}
             </section>

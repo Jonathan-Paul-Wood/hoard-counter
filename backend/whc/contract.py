@@ -232,6 +232,7 @@ def specification():
     submission['responses']['202'] = {'description': 'Jobs accepted', 'content': {'application/json': {'schema': ref('ImportJob')}}}
     submission['responses']['200'] = {'description': 'Files already received', 'content': {'application/json': {'schema': obj({'already_received': {'type': 'boolean'}}, ['already_received'])}}}
     paths['/transactions/import/jobs'] = {'post': submission}
+    paths['/transactions/import/jobs/{id}'] = {'parameters': [id_parameter], 'delete': operation('Delete a finished import job record', obj({'cleared': {'type': 'boolean'}}, ['cleared']), method='delete')}
     paths['/transactions/import/jobs/{id}/cancel'] = {'parameters': [id_parameter], 'post': operation('Stop checks for a delayed import', ref('ImportJob'), method='post')}
     paths['/transactions/import/summary'] = {'get': operation('Read household import badge and job progress', ref('ImportSummary'))}
     paths['/transactions/import/review'] = {'get': operation('Read household pending transactions', ref('PendingReview'))}
