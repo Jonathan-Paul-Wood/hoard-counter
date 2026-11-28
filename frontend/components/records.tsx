@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   compareAmounts,
   signedTransactionAmount,
@@ -723,6 +723,28 @@ export function Transactions({
     version,
   );
   const [importOpen, setImportOpen] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const [pendingCount, setPendingCount] = useState(0);
+  useEffect(() => {
+    let active = true;
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      try {
+        const summary = await api<{ pending_count: number }>(
+          "/transactions/import/summary",
+        );
+        if (active) setPendingCount(summary.pending_count);
+      } catch {
+        /* The review modal reports request errors. */
+      }
+      if (active) timer = setTimeout(poll, 5000);
+    };
+    void poll();
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [version]);
   const [page, setPage] = useState(1);
   const [sort, setSort] = useState<TableSort | null>(null);
   const [filters, setFilters] = useState<Record<string, string>>({
@@ -757,14 +779,27 @@ export function Transactions({
           action={
             <div className="transaction-actions">
               <AddButton onClick={() => setEditor(null)}>
-                Add transaction
+                Add Transactions
               </AddButton>
-              {importSettings.ocr_configured && (
-                <Button variant="secondary" onClick={() => setImportOpen(true)}>
-                  <FileUp size={16} />
-                  Import Transactions
-                </Button>
-              )}
+              <Button
+                variant="secondary"
+                disabled={!importSettings.ocr_configured}
+                onClick={() => setImportOpen(true)}
+              >
+                <FileUp size={16} />
+                Import Transactions
+              </Button>
+              <Button variant="secondary" onClick={() => setReviewOpen(true)}>
+                Review Imports{" "}
+                {pendingCount > 0 && (
+                  <span
+                    className="import-badge"
+                    aria-label={`${pendingCount} pending reviews`}
+                  >
+                    {pendingCount}
+                  </span>
+                )}
+              </Button>
             </div>
           }
         />
@@ -939,6 +974,9 @@ export function Transactions({
         />
       )}
       {importOpen && <TransactionImport onClose={() => setImportOpen(false)} />}
+      {reviewOpen && (
+        <TransactionImport reviewOnly onClose={() => setReviewOpen(false)} />
+      )}
     </>
   );
 }

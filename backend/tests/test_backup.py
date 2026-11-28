@@ -221,6 +221,18 @@ def test_failed_migration_restores_previous_data_and_release(state, monkeypatch)
         assert conn.execute("SELECT sum(CAST(amount AS NUMERIC)) FROM postings").fetchone()[0] == 0
 
 
+@pytest.mark.parametrize('supported', [False, True])
+def test_deployment_only_starts_collector_in_images_that_support_it(monkeypatch, supported):
+    spec = importlib.util.spec_from_file_location('deployment_manager_collector', Path(__file__).resolve().parents[2] / 'scripts/manage.py')
+    manager = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(manager)
+    calls = []
+    monkeypatch.setattr(manager, 'supports_import_collector', lambda *args: supported)
+    monkeypatch.setattr(manager, 'compose', lambda env, release, *args, **kw: calls.append(args))
+    manager.start_apps({}, 'test-release')
+    assert ('import-collector' in calls[0]) is supported
+
+
 def test_scheduler_and_retention_use_saved_household_timezone(state, monkeypatch):
     from whc.backup import configured_timezone
     database, _, _ = state

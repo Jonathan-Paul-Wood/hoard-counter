@@ -15,8 +15,8 @@ from whc import create_app, migrations
 
 def test_migration_directory_has_exactly_one_head():
     scripts = ScriptDirectory.from_config(migrations.migration_config())
-    assert scripts.get_heads() == ["0006_category_text_limits"]
-    assert scripts.get_revision("head").down_revision == "0005_merge_returns_budgets"
+    assert scripts.get_heads() == ["0007_pending_transactions"]
+    assert scripts.get_revision("head").down_revision == "0006_category_text_limits"
     assert set(scripts.get_revision("0005_merge_returns_budgets").down_revision) == {
         "0003_remove_returns", "0004_reset_budgets",
     }
@@ -164,10 +164,10 @@ def test_merge_upgrades_all_branch_states_and_audits_once(installation, starting
     for _ in range(2):
         app = create_app(app_config)
         assert app.test_client().get("/api/health").json == {
-            "status": "ok", "schema": "0006_category_text_limits",
+            "status": "ok", "schema": "0007_pending_transactions",
         }
         with sqlite3.connect(database) as connection:
-            assert connection.execute("SELECT version_num FROM alembic_version").fetchall() == [("0006_category_text_limits",)]
+            assert connection.execute("SELECT version_num FROM alembic_version").fetchall() == [("0007_pending_transactions",)]
             audits = connection.execute('SELECT * FROM "migration-runs" ORDER BY id').fetchall()
             names = connection.execute('SELECT migration_file FROM "migration-runs"').fetchall()
             assert len(names) == len(expected_files)

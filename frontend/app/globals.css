@@ -3090,3 +3090,15 @@ th {
 .statement-import-body {
   padding: 0 28px 20px;
 }
+.import-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.4rem;
+  height: 1.4rem;
+  padding: 0 .35rem;
+  border-radius: 999px;
+  background: var(--accent, #7151a1);
+  color: white;
+  font-size: .75rem;
+}

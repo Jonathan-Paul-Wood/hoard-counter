@@ -7,10 +7,36 @@ A private household ledger for budgeting, spending, subscriptions, investment pl
 - Individual household logins with administrator/member permissions.
 - Exact-decimal, double-entry transactions, editable history, refunds, native currencies, dated USD conversion rates, and asset/debt balances.
 - Receipts and item images, categories/tags, recurring subscriptions, transaction rules, and recurring category budgets with cumulative allowances and future projections.
-- Optional OCR Processor / SystemOne connection for bank statements, CSV lists and receipt uploads, editable transaction previews, transfer suggestions, and reviewed batch creation.
+- Optional OCR Processor / SystemOne connection for background statement, CSV, and receipt imports. Review Imports keeps editable drafts in `pending_transactions`; accepted rows become ledger transactions only when saved.
 - History-based expense forecasts, aggregate investment valuations, cash-flow-adjusted performance, and saved projection scenarios.
 - Filtered CSV/PDF reports, editable CSV templates, previewed UUID/timestamp imports, and complete financial archives with attachments.
 - Persistent Docker storage, Alembic migrations, verified weekly backups with calendar retention, and an upgrade/restore command.
+
+### Background import collection
+
+Docker Compose runs `import-collector` alongside the API. For local development,
+run `python -m whc.import_collector` from `backend` with the same database, data
+directory, and secret-key environment as the API. The collector must run even when
+no browser is open; do not run it inside individual Gunicorn workers.
+
+Deploy the updated OCR Processor before using background uploads. The Transactions
+screen offers Add Transactions, Import Transactions, and Review Imports. After an
+upload is accepted, Review Imports shows file progress and saved household drafts.
+Closing the modal or browser does not cancel processing. Save edits with Accepted
+unchecked to keep a draft, or check Accepted and save to create/update its ledger
+transaction. Delete draft takes effect when changes are saved. Pending drafts do
+not affect balances or reports and are included in full database backups.
+
+Checks back off through 1, 2, 4, 8, 16, 32, 64, and 128 seconds. After six minutes,
+an import is marked delayed and collection continues at 128-second intervals.
+Cancel checks is available for delayed imports; it stops collection, not OCR work.
+Results are committed before OCR is acknowledged, and ingestion receipts prevent
+duplicate drafts after retries, acceptance, deletion, or OCR cleanup.
+
+The new `0007_pending_transactions` migration must be deployed through the normal
+backed-up upgrade procedure. OCR jobs are temporary until acknowledgment, service
+restart, or request-triggered cleanup after 24 hours; saved Hoard Counter drafts
+remain until accepted or deleted.
 
 ## Run on Linux
 

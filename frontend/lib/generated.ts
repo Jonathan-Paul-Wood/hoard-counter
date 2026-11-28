@@ -79,7 +79,7 @@ export type AuditEvent = { id: string; record_id?: string | null; kind: string; 
 
 export type BackupStatus = { last_success: string | null; last_error: string | null; destination: string; schedule: string; timezone: string; status?: "ok" | "error"; last_attempt?: string; archive?: string };
 
-export type ImportSummary = { create?: number; update?: number; skip?: number; conflict?: number };
+export type ImportSummary = { pending_count: number; jobs: Array<ImportJob> };
 
 export type ImportChange = { kind: string; id: string; action: "create" | "update" | "skip" | "conflict"; description?: string; line?: number | null; after?: Record<string, unknown>; message?: string };
 
@@ -95,13 +95,21 @@ export type StatementTransaction = { type: string; date: string; description: st
 
 export type ExistingTransferCandidate = { id: string; revision: number; transaction: StatementTransaction; sources: Array<StatementSource> };
 
-export type StatementRow = { id: string; transaction: StatementTransaction; sources: Array<StatementSource>; selected?: boolean; existing_transfer_candidates?: Array<ExistingTransferCandidate>; existing_transaction_id?: string; existing_revision?: number; warnings?: Array<string>; errors?: Array<string>; duplicate_ids?: Array<string>; transfer_candidates?: Array<string>; acknowledged_duplicates?: Array<string> };
+export type StatementRow = { id: string; transaction: StatementTransaction; sources: Array<StatementSource>; selected?: boolean; existing_transfer_candidates?: Array<ExistingTransferCandidate>; existing_transaction_id?: string; existing_revision?: number; warnings?: Array<string>; errors?: Array<string>; duplicate_ids?: Array<string>; transfer_candidates?: Array<string>; acknowledged_duplicates?: Array<string>; revision?: number; combined_ids?: Array<string>; submission_id?: string; created_at?: string };
 
 export type StatementPreview = { batch_id: string; rows: Array<StatementRow>; warnings: Array<string> };
 
 export type StatementApproval = { batch_id: string; rows: Array<StatementRow> };
 
 export type StatementImportResult = { transaction_ids: Array<string>; total: number; created_count?: number; updated_count?: number; updated_transaction_ids?: Array<string> };
+
+export type ImportJobFile = { job_id: string; run_id: string; filename: string; status: "processing_file" | "extracting_transactions" | "identifying_accounts" | "determining_categories" | "completed"; state: "queued" | "running" | "succeeded" | "failed"; completed: number; total: number | null; error?: unknown };
+
+export type ImportJob = { id: string; state: string; created_at?: number; files: Array<ImportJobFile>; error?: string | null; warnings?: Array<string>; already_received?: boolean };
+
+export type PendingReview = { pending_count: number; jobs: Array<ImportJob>; rows: Array<StatementRow> };
+
+export type PendingSave = { operation_id: string; rows?: Array<StatementRow>; deleted?: Array<{ id: string; revision: number }> };
 
 export type AccountInput = { name: string; type: string; account_class?: "asset" | "liability" | "income" | "expense" | "equity"; currency?: string; opening_balance?: string; opening_date?: string; account_number?: string | null; description?: string; closed_on?: string | null; opening_currency?: string };
 

@@ -129,11 +129,22 @@ def maintenance(root, enabled):
 
 
 def stop_apps(env, release):
-    compose(env, release, "stop", "--timeout", "130", "api", "web")
+    compose(env, release, "stop", "--timeout", "130", "api", "web", "import-collector")
+
+
+def supports_import_collector(env, release):
+    image = env.get('IMAGE_PREFIX', 'hoard-counter') + '-api:' + release
+    result = subprocess.run(['docker', 'image', 'inspect', '--format', '{{ index .Config.Labels "org.hoard-counter.import-collector" }}', image],
+                            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+    return result.returncode == 0 and result.stdout.strip() == 'true'
 
 
 def start_apps(env, release, recreate_proxy=False):
-    compose(env, release, "up", "-d", "--no-deps", "--force-recreate", "--wait", "--wait-timeout", "180", "api", "web")
+    services = ['api', 'web']
+    # Rollbacks may target an image predating the collector module and draft table.
+    if supports_import_collector(env, release):
+        services.append('import-collector')
+    compose(env, release, "up", "-d", "--no-deps", "--force-recreate", "--wait", "--wait-timeout", "180", *services)
     # Recreate also remounts /state after an atomic data-directory restore.
     args = ["up", "-d", "--no-deps"]
     if recreate_proxy:

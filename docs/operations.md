@@ -61,6 +61,8 @@ sudo python3 scripts/manage.py deploy --version 1.1.0
 
 The command builds while the previous version continues serving. It then enters a brief maintenance window, creates and verifies a complete pre-upgrade snapshot, stops the old API, runs `alembic upgrade head` from the new image, and waits for both new services to become healthy. Only then does it update the active release and reopen access. The Compose API checks that the schema is current on startup and leaves upgrades to the deployment manager so they always have a recovery path.
 
+The import collector is stopped alongside the API during migration and restore. New API images advertise collector support through an image label; rollback to an older image does not start a collector that the older image cannot run.
+
 After a successful managed upgrade or restore, set `APP_VERSION` in `.env` to the active version shown by `scripts/manage.py status` before running direct Compose commands. The manager uses the explicit release tag and does not rewrite `.env`.
 
 If migration or readiness fails, the command restores the verified snapshot into fresh directories, switches the stopped data/uploads directories, and restarts the previous images. A failed command still exits nonzero after successful rollback so deployment monitoring sees the failed upgrade. If rollback itself fails, the maintenance page remains and the exception identifies the recovery snapshot. Old stopped directories are retained as `.replaced-<id>` under the storage root; inspect and remove those manually once recovery is confirmed.

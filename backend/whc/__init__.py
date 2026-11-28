@@ -57,7 +57,7 @@ def create_app(config=None):
     from .resources import bp as resources_bp
     app.register_blueprint(auth_bp, url_prefix="/api/v1")
     app.register_blueprint(resources_bp, url_prefix="/api/v1")
-    for name in ("analytics", "exchange", "reports", "files", "admin", "statement_import"):
+    for name in ("analytics", "exchange", "reports", "files", "admin", "statement_import", "pending_imports"):
         try:
             module = importlib.import_module("whc." + name)
         except ModuleNotFoundError as error:
@@ -75,7 +75,7 @@ def create_app(config=None):
                 from .backup import mutation_lock
             except ImportError:
                 mutation_lock = None
-            guard = mutation_lock(app.config["DATA_DIR"], exclusive=False) if mutation_lock else nullcontext()
+            guard = mutation_lock(app.config["DATA_DIR"], exclusive=False) if mutation_lock and request.endpoint != 'pending_imports.submit' else nullcontext()
             guard.__enter__()
             g.mutation_guard = guard
             if (Path(app.config["DATA_DIR"]) / ".maintenance").exists():
@@ -89,7 +89,7 @@ def create_app(config=None):
                 token = request.headers.get("X-CSRF-Token", "")
                 if not token or not secrets.compare_digest(token, session.get("csrf_token", "")):
                     raise ApiError("Your session token has expired. Reload and try again.", 403, "csrf_failed")
-            if db.engine.dialect.name == "sqlite" and request.endpoint not in ("statement_import.preview", "statement_import.test_connection"):
+            if db.engine.dialect.name == "sqlite" and request.endpoint not in ("statement_import.preview", "statement_import.test_connection", "pending_imports.submit"):
                 # Serializes compare-and-swap revisions and subscription occurrence claims.
                 db.session.execute(text("BEGIN IMMEDIATE"))
         uid = session.get("user_id")

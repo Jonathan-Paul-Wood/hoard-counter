@@ -95,7 +95,7 @@ def processor_error_details(error, settings):
     return details
 
 
-def processor_call(settings, path, body=None, content_type=None):
+def processor_call(settings, path, body=None, content_type=None, timeout=None):
     headers = {'Accept': 'application/json'}
     if settings.get('ocr_token'):
         headers['Authorization'] = 'Bearer ' + settings['ocr_token']
@@ -106,7 +106,7 @@ def processor_call(settings, path, body=None, content_type=None):
         raise ApiError('Configure OCR Processor in Settings first.', 409, 'ocr_not_configured')
     req = Request(target + path, data=body, headers=headers)
     try:
-        with build_opener(NoRedirect()).open(req, timeout=1830 if body else 30) as response:
+        with build_opener(NoRedirect()).open(req, timeout=timeout if timeout is not None else (1830 if body else 30)) as response:
             payload = response.read(MAX_RESPONSE + 1)
         if len(payload) > MAX_RESPONSE:
             raise ApiError('OCR Processor returned an oversized response.', 502, 'ocr_response_invalid')
@@ -173,10 +173,13 @@ def extraction_schema():
                 'additionalProperties': False, 'properties': properties, 'required': list(properties)}}}}
 
 
-def multipart(files, context):
+def multipart(files, context, manifest=None):
     boundary = 'hoard-' + uuid4().hex
     chunks = []
-    for name, value in [('context', json.dumps(context)), ('output_format', json.dumps(extraction_schema()))]:
+    fields = [('context', json.dumps(context)), ('output_format', json.dumps(extraction_schema()))]
+    if manifest is not None:
+        fields.append(('manifest', json.dumps(manifest)))
+    for name, value in fields:
         chunks.append(f'--{boundary}\r\nContent-Disposition: form-data; name="{name}"\r\n\r\n{value}\r\n'.encode())
     for index, payload in enumerate(files):
         chunks.extend([f'--{boundary}\r\nContent-Disposition: form-data; name="documents"; filename="document-{index}"\r\nContent-Type: application/octet-stream\r\n\r\n'.encode(), payload, b'\r\n'])
@@ -367,6 +370,10 @@ def preview():
     if len(body) > max_bytes:
         raise ApiError('Documents plus account/category/rule context exceed the processor request limit.', 413)
     result = processor_call(settings, '/v1/transactions', body, content_type)
+    return jsonify(build_preview(result, names, accounts, categories))
+
+
+def build_preview(result, names, accounts, categories):
     extracted = result.get('data', {}).get('transactions') if isinstance(result.get('data'), dict) else None
     if not isinstance(extracted, list) or len(extracted) > 500:
         raise ApiError('OCR Processor returned invalid transactions or more than 500 rows. Use a smaller batch.', 502)
@@ -427,13 +434,17 @@ def preview():
     warnings = result.get('warnings', [])
     if not isinstance(warnings, list) or any(not isinstance(value, str) for value in warnings):
         raise ApiError('OCR Processor returned malformed warnings.', 502)
-    return jsonify(batch_id=str(uuid4()), rows=rows, warnings=warnings)
+    return dict(batch_id=str(uuid4()), rows=rows, warnings=warnings)
 
 
 @bp.post('/transactions/import/commit')
 @login_required
 def commit():
     payload = request.get_json(silent=True)
+    return jsonify(apply_approval(payload, g.user))
+
+
+def apply_approval(payload, actor, commit=True):
     if not isinstance(payload, dict):
         raise ApiError('Provide an approval object.')
     batch_id = identifier(payload.get('batch_id'))
@@ -443,9 +454,9 @@ def commit():
     digest = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
     receipt = db.session.get(Record, batch_id)
     if receipt:
-        if receipt.kind != 'statement_import' or receipt.data.get('actor_id') != g.user.id or receipt.data.get('digest') != digest:
+        if receipt.kind != 'statement_import' or receipt.data.get('actor_id') != actor.id or receipt.data.get('digest') != digest:
             raise ApiError('This batch was already approved with a different payload.', 409, 'import_conflict')
-        return jsonify(receipt.data['result'])
+        return receipt.data['result']
     accounts = {record.id: record.to_dict() for record in list_records('account')}
     clean_rows = []
     for row in rows:
@@ -509,7 +520,7 @@ def commit():
                                   for source in original_sources + row['sources']}.values())
         transaction = {**row['transaction'], 'import_sources': row['sources'], 'import_batch_id': batch_id}
         try:
-            record = save_record('transaction', transaction, g.user, record_id=existing_id,
+            record = save_record('transaction', transaction, actor, record_id=existing_id,
                 expected_revision=row['existing_revision'], origin='statement-import', apply_rules=False)
         except ApiError as exc:
             raise ApiError('An approved row could not be saved. Review the highlighted row.', exc.status,
@@ -517,6 +528,9 @@ def commit():
         (updated if existing_id else created).append(record.id)
     result = dict(transaction_ids=created + updated, total=len(created) + len(updated),
                   created_count=len(created), updated_count=len(updated), updated_transaction_ids=updated)
-    db.session.add(Record(id=batch_id, kind='statement_import', data=dict(actor_id=g.user.id, digest=digest, result=result)))
-    db.session.commit()
-    return jsonify(result)
+    db.session.add(Record(id=batch_id, kind='statement_import', data=dict(actor_id=actor.id, digest=digest, result=result)))
+    if commit:
+        db.session.commit()
+    else:
+        db.session.flush()
+    return result

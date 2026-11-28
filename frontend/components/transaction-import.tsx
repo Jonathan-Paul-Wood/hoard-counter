@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { FileUp, Undo2 } from "lucide-react";
 import { api, ApiError, Entity, errorMessage } from "@/lib/api";
 import type {
@@ -8,6 +8,8 @@ import type {
   StatementRow,
   StatementTransaction,
   StatementImportResult,
+  PendingReview,
+  ImportJob,
 } from "@/lib/generated";
 import {
   combineTransfer,
@@ -15,17 +17,44 @@ import {
 } from "@/lib/statement-import";
 import { Button, ErrorBox, Field, Modal, useApp } from "./ui";
 
-export function TransactionImport({ onClose }: { onClose: () => void }) {
+export function TransactionImport({
+  onClose,
+  reviewOnly = false,
+}: {
+  onClose: () => void;
+  reviewOnly?: boolean;
+}) {
   const { accounts, categories, tags, subscriptions, meta, notify, refresh } =
     useApp();
   const [files, setFiles] = useState<File[]>([]);
   const [preview, setPreview] = useState<StatementPreview | null>(null);
-  const [rows, setRows] = useState<StatementRow[]>([]);
+  const [rows, setRowsInternal] = useState<StatementRow[]>([]);
+  const [jobs, setJobs] = useState<ImportJob[]>([]);
+  const [dirty, setDirty] = useState(false);
+  const baseline = useRef(new Map<string, StatementRow>());
+  const hidden = useRef(new Set<string>());
+  const saveRequest = useRef<{ body: string; operationId: string } | null>(
+    null,
+  );
+  const loadSequence = useRef(0);
+  const saving = useRef(false);
+  const setRows: typeof setRowsInternal = (value) => {
+    setDirty(true);
+    setRowsInternal(value);
+  };
+  const [reviewing, setReviewing] = useState(reviewOnly);
   const [undo, setUndo] = useState<StatementRow[][]>([]);
   const [busy, setBusy] = useState(false);
   const close = useCallback(() => {
-    if (!busy) onClose();
-  }, [busy, onClose]);
+    if (
+      !busy &&
+      (!dirty ||
+        window.confirm(
+          "Discard unsaved changes? Saved drafts and background imports will remain.",
+        ))
+    )
+      onClose();
+  }, [busy, dirty, onClose]);
   const [error, setError] = useState("");
   const [acknowledged, setAcknowledged] = useState(false);
   const financialIds = new Set<string>(
@@ -60,6 +89,68 @@ export function TransactionImport({ onClose }: { onClose: () => void }) {
       ),
     );
   }
+  async function loadReview(reset = false) {
+    if (saving.current && !reset) return;
+    const sequence = ++loadSequence.current;
+    const result = await api<PendingReview>("/transactions/import/review");
+    if (sequence !== loadSequence.current || (saving.current && !reset)) return;
+    setJobs(result.jobs);
+    setPreview({ batch_id: "pending", rows: result.rows, warnings: [] });
+    setRowsInternal((current) => {
+      if (reset) {
+        baseline.current = new Map(result.rows.map((row) => [row.id, row]));
+        hidden.current.clear();
+        return result.rows;
+      }
+      const remote = new Map(result.rows.map((row) => [row.id, row]));
+      const retained = current.flatMap((row) => {
+        const original = baseline.current.get(row.id);
+        if (original && JSON.stringify(original) === JSON.stringify(row)) {
+          const updated = remote.get(row.id);
+          if (!updated) {
+            baseline.current.delete(row.id);
+            return [];
+          }
+          baseline.current.set(row.id, updated);
+          return [updated];
+        }
+        return [row];
+      });
+      const existing = new Set(retained.map((row) => row.id));
+      const added = result.rows.filter(
+        (row) => !existing.has(row.id) && !hidden.current.has(row.id),
+      );
+      added.forEach((row) => baseline.current.set(row.id, row));
+      return [...retained, ...added];
+    });
+  }
+  useEffect(() => {
+    if (!reviewing) return;
+    let active = true;
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      try {
+        if (active) await loadReview();
+      } catch (e) {
+        if (active) setError(errorMessage(e));
+      }
+      if (active) timer = setTimeout(poll, 5000);
+    };
+    void poll();
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [reviewing]);
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (event: BeforeUnloadEvent) => {
+      event.preventDefault();
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
+
   async function analyze(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
@@ -67,13 +158,18 @@ export function TransactionImport({ onClose }: { onClose: () => void }) {
     try {
       const body = new FormData();
       files.forEach((file) => body.append("documents", file));
-      const result = await api<StatementPreview>(
-        "/transactions/import/preview",
+      const result = await api<{ already_received?: boolean }>(
+        "/transactions/import/jobs",
         { method: "POST", body },
       );
-      setPreview(result);
-      setRows(result.rows);
-      setUndo([]);
+      if (result.already_received)
+        notify(
+          "These files were already received. Existing drafts are available in Review Imports.",
+        );
+      setReviewing(true);
+      await loadReview(true);
+      setDirty(false);
+      refresh();
     } catch (e) {
       setError(errorMessage(e));
     } finally {
@@ -81,61 +177,82 @@ export function TransactionImport({ onClose }: { onClose: () => void }) {
     }
   }
   async function approve() {
-    if (!preview) return;
+    saving.current = true;
+    ++loadSequence.current;
     setBusy(true);
     setError("");
     try {
+      const deleted = [...baseline.current.values()]
+        .filter((row) => !rows.some((current) => current.id === row.id))
+        .map((row) => ({ id: row.id, revision: row.revision }));
+      const changes = rows.filter(
+        (row) =>
+          JSON.stringify(row) !== JSON.stringify(baseline.current.get(row.id)),
+      );
+      if (!changes.length && !deleted.length) {
+        setDirty(false);
+        return;
+      }
+      const body = JSON.stringify({ rows: changes, deleted });
+      if (!saveRequest.current || saveRequest.current.body !== body)
+        saveRequest.current = { body, operationId: crypto.randomUUID() };
       const result = await api<StatementImportResult>(
-        "/transactions/import/commit",
+        "/transactions/import/review/save",
         {
           method: "POST",
           body: JSON.stringify({
-            batch_id: preview.batch_id,
-            rows: rows.filter((row) => row.selected),
+            operation_id: saveRequest.current.operationId,
+            rows: changes,
+            deleted,
           }),
         },
       );
       notify(
-        result.updated_count
-          ? `${result.created_count || 0} ${result.created_count === 1 ? "transaction" : "transactions"} created; ${result.updated_count} existing ${result.updated_count === 1 ? "transaction" : "transactions"} updated.`
-          : `${result.total} ${result.total === 1 ? "transaction" : "transactions"} imported.`,
+        result.total
+          ? `Saved drafts and accepted ${result.total} transactions.`
+          : "Pending changes saved.",
       );
+      saveRequest.current = null;
+      await loadReview(true);
+      setUndo([]);
+      setDirty(false);
+      setAcknowledged(false);
       refresh();
-      onClose();
     } catch (e) {
       setError(errorMessage(e));
-      if (e instanceof ApiError) {
-        const details = e.details?.error?.details;
-        if (details?.row_id)
-          setRows((current) =>
-            current.map((row) =>
-              row.id === details.row_id
-                ? { ...row, errors: details.errors }
-                : row,
-            ),
-          );
-        if (details?.rows)
-          setRows((current) =>
-            current.map((row) => {
-              const conflict = details.rows.find(
-                (item: { row_id: string }) => item.row_id === row.id,
-              );
-              return conflict
-                ? {
-                    ...row,
-                    duplicate_ids: conflict.duplicate_ids,
-                    acknowledged_duplicates: [],
-                  }
-                : row;
-            }),
-          );
+      if (e instanceof ApiError && e.details?.error?.details?.rows) {
+        const conflicts = e.details.error.details.rows;
+        setRowsInternal((current) =>
+          current.map((row) => {
+            const conflict = conflicts.find(
+              (item: { row_id: string }) => item.row_id === row.id,
+            );
+            return conflict
+              ? { ...row, duplicate_ids: conflict.duplicate_ids }
+              : row;
+          }),
+        );
       }
     } finally {
+      saving.current = false;
       setBusy(false);
     }
   }
+  async function cancelChecks(id: string) {
+    try {
+      await api(`/transactions/import/jobs/${id}/cancel`, { method: "POST" });
+      await loadReview();
+    } catch (e) {
+      setError(errorMessage(e));
+    }
+  }
+  function removeDraft(id: string) {
+    hidden.current.add(id);
+    setRows((current) => current.filter((row) => row.id !== id));
+    setUndo([]);
+  }
   function merge(left: string, right: string, existing = false) {
-    const next = existing
+    let next = existing
       ? combineExistingTransfer(rows, left, right, financialIds)
       : combineTransfer(rows, left, right, financialIds);
     if (next === rows) {
@@ -144,6 +261,28 @@ export function TransactionImport({ onClose }: { onClose: () => void }) {
       );
       return;
     }
+    const removed = rows.filter(
+      (row) => !next.some((item) => item.id === row.id),
+    );
+    removed.forEach((row) => hidden.current.add(row.id));
+    next = next.map((row) =>
+      row.transaction.type === "Transfer" &&
+      row.sources.length >
+        (rows.find((item) => item.id === row.id)?.sources.length || 0)
+        ? {
+            ...row,
+            combined_ids: [
+              ...new Set([
+                ...(row.combined_ids || []),
+                ...removed.flatMap((item) => [
+                  item.id,
+                  ...(item.combined_ids || []),
+                ]),
+              ]),
+            ],
+          }
+        : row,
+    );
     setUndo([...undo, rows]);
     setRows(next);
     setError("");
@@ -159,14 +298,66 @@ export function TransactionImport({ onClose }: { onClose: () => void }) {
 
   return (
     <Modal
-      title="Import Transactions"
-      subtitle="Extract statements, CSV lists or receipts, review every row, then approve."
+      title={reviewing ? "Review Imports" : "Import Transactions"}
+      subtitle={
+        reviewing
+          ? "Edit drafts, mark accepted transactions, then save. Closing this window does not stop imports."
+          : "Upload statements, CSV lists or receipts for background processing."
+      }
       onClose={close}
       wide
       className="statement-import-modal"
     >
       <div className="statement-import-body">
-        {!preview ? (
+        {reviewing &&
+          jobs.map((job) => (
+            <section
+              className="notice"
+              key={job.id}
+              aria-label="Import progress"
+            >
+              <strong>
+                {job.state === "ack_pending"
+                  ? "Results saved"
+                  : job.state.replaceAll("_", " ")}
+              </strong>
+              <span>
+                {" "}
+                —{" "}
+                {job.files.filter((file) => file.state === "succeeded").length}/
+                {job.files.length} files completed
+              </span>
+              {job.files.map((file) => (
+                <p className="small" key={file.run_id}>
+                  {file.filename}:{" "}
+                  {file.state === "queued"
+                    ? "Queued"
+                    : file.state === "failed"
+                      ? "Failed"
+                      : file.status.replaceAll("_", " ")}
+                  {file.state !== "failed" &&
+                    ` — ${file.completed}/${file.total ?? "?"}`}
+                  {file.error != null &&
+                    typeof file.error === "object" &&
+                    "message" in file.error &&
+                    ` — ${String(file.error.message)}`}
+                </p>
+              ))}
+              {job.error && <p role="alert">{job.error}</p>}
+              {job.warnings?.map((warning, index) => (
+                <p key={index}>{warning}</p>
+              ))}
+              {job.state === "delayed" && (
+                <Button
+                  variant="secondary"
+                  onClick={() => void cancelChecks(job.id)}
+                >
+                  Cancel checks
+                </Button>
+              )}
+            </section>
+          ))}
+        {!reviewing ? (
           <form onSubmit={analyze}>
             <Field
               label="Statements, transaction lists or receipts"
@@ -219,19 +410,21 @@ export function TransactionImport({ onClose }: { onClose: () => void }) {
         ) : (
           <>
             <p className="notice">
-              Review dates, amounts, accounts, and categories before approving.
-              Possible duplicates start excluded. Transfer suggestions require
-              explicit combination. Matching a saved transaction updates it into
-              a transfer when approved.
+              Review dates, amounts, accounts, and categories before accepting.
+              Drafts stay pending unless marked Accepted when saved. Deletions
+              take effect when saved. Transfer suggestions require explicit
+              combination. Matching a saved transaction updates it into a
+              transfer when approved.
             </p>
-            {preview.warnings.map((warning, i) => (
+            {preview?.warnings.map((warning, i) => (
               <p className="muted small" key={i}>
                 {warning}
               </p>
             ))}
             {!rows.length && (
               <p>
-                No posted transactions were extracted. Try another statement.
+                No pending transactions. Background results will appear here
+                when ready.
               </p>
             )}
             {!!undo.length && (
@@ -251,7 +444,7 @@ export function TransactionImport({ onClose }: { onClose: () => void }) {
                 <table className="statement-preview">
                   <thead>
                     <tr>
-                      <th>Include</th>
+                      <th>Accepted</th>
                       <th>Date / description</th>
                       <th>Type / accounts</th>
                       <th>Amounts / currencies</th>
@@ -312,7 +505,7 @@ export function TransactionImport({ onClose }: { onClose: () => void }) {
                           <td>
                             <input
                               type="checkbox"
-                              aria-label={`Include row ${index + 1}`}
+                              aria-label={`Accepted row ${index + 1}`}
                               checked={!!row.selected}
                               onChange={(e) =>
                                 setRows(
@@ -513,6 +706,12 @@ export function TransactionImport({ onClose }: { onClose: () => void }) {
                               )}
                           </td>
                           <td>
+                            <Button
+                              variant="text"
+                              onClick={() => removeDraft(row.id)}
+                            >
+                              Delete draft
+                            </Button>
                             {row.sources.map((source, i) => (
                               <p className="small" key={i}>
                                 {source.filename}, page {source.page}
@@ -638,32 +837,20 @@ export function TransactionImport({ onClose }: { onClose: () => void }) {
             )}
             <ErrorBox error={error} />
             <div className="modal-footer">
-              <Button variant="secondary" disabled={busy} onClick={onClose}>
-                Cancel
-              </Button>
-              <Button
-                variant="secondary"
-                disabled={busy}
-                onClick={() => {
-                  setPreview(null);
-                  setRows([]);
-                  setAcknowledged(false);
-                }}
-              >
-                Choose other files
+              <Button variant="secondary" disabled={busy} onClick={close}>
+                Close
               </Button>
               <Button
                 busy={busy}
                 disabled={
-                  !selected.length || !acknowledged || unacknowledgedDuplicates
+                  !dirty ||
+                  (selected.length > 0 &&
+                    (!acknowledged || unacknowledgedDuplicates))
                 }
                 onClick={approve}
               >
-                {updateCount
-                  ? createCount
-                    ? `Create ${createCount} and update ${updateCount} transactions`
-                    : `Update ${updateCount} ${updateCount === 1 ? "transaction" : "transactions"}`
-                  : `Create ${selected.length} ${selected.length === 1 ? "transaction" : "transactions"}`}
+                Save changes
+                {selected.length ? ` and accept ${selected.length}` : ""}
               </Button>
             </div>
           </>

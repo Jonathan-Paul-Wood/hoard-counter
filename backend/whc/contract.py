@@ -105,6 +105,19 @@ SCHEMAS.update({
     'StatementImportResult': obj({'transaction_ids': {'type': 'array', 'items': ID}, 'total': {'type': 'integer'}, 'created_count': {'type': 'integer'}, 'updated_count': {'type': 'integer'}, 'updated_transaction_ids': {'type': 'array', 'items': ID}}, ['transaction_ids', 'total']),
 })
 SCHEMAS['StatementTransaction']['properties'].update(subscription_id={'anyOf': [ID, {'type': 'null'}]}, subscription_date={'anyOf': [string(), {'type': 'null'}]})
+SCHEMAS['StatementRow']['properties'].update(revision={'type': 'integer', 'minimum': 1}, combined_ids={'type': 'array', 'items': ID}, submission_id=ID, created_at=string())
+SCHEMAS.update({
+    'ImportJobFile': obj({'job_id': string(), 'run_id': ID, 'filename': string(),
+        'status': string(enum=['processing_file', 'extracting_transactions', 'identifying_accounts', 'determining_categories', 'completed']),
+        'state': string(enum=['queued', 'running', 'succeeded', 'failed']), 'completed': {'type': 'integer'},
+        'total': {'anyOf': [{'type': 'integer'}, {'type': 'null'}]}, 'error': {}}, ['job_id', 'run_id', 'filename', 'status', 'state', 'completed', 'total']),
+    'ImportJob': obj({'id': ID, 'state': string(), 'created_at': {'type': 'number'}, 'files': {'type': 'array', 'items': ref('ImportJobFile')},
+        'error': {'anyOf': [string(), {'type': 'null'}]}, 'warnings': {'type': 'array', 'items': string()}, 'already_received': {'type': 'boolean'}}, ['id', 'state', 'files']),
+    'ImportSummary': obj({'pending_count': {'type': 'integer'}, 'jobs': {'type': 'array', 'items': ref('ImportJob')}}, ['pending_count', 'jobs']),
+    'PendingReview': obj({'pending_count': {'type': 'integer'}, 'jobs': {'type': 'array', 'items': ref('ImportJob')}, 'rows': {'type': 'array', 'items': ref('StatementRow')}}, ['pending_count', 'jobs', 'rows']),
+    'PendingSave': obj({'operation_id': ID, 'rows': {'type': 'array', 'items': ref('StatementRow')},
+        'deleted': {'type': 'array', 'items': obj({'id': ID, 'revision': {'type': 'integer', 'minimum': 1}}, ['id', 'revision'])}}, ['operation_id']),
+})
 SCHEMAS['Transaction']['properties'].update(import_sources={'type': 'array', 'items': ref('StatementSource'), 'readOnly': True}, import_batch_id={**ID, 'readOnly': True})
 
 
@@ -214,6 +227,15 @@ def specification():
     preview['requestBody'] = {'required': True, 'content': {'multipart/form-data': {'schema': obj({'documents': {'type': 'array', 'items': string(format='binary'), 'minItems': 1, 'maxItems': 5}}, ['documents'])}}}
     paths['/transactions/import/preview'] = {'post': preview}
     paths['/transactions/import/commit'] = {'post': operation('Apply approved statement creations and transfer updates atomically', ref('StatementImportResult'), ref('StatementApproval'), 'post')}
+    submission = deepcopy(preview)
+    submission['summary'] = 'Submit background OCR file jobs'
+    submission['responses']['202'] = {'description': 'Jobs accepted', 'content': {'application/json': {'schema': ref('ImportJob')}}}
+    submission['responses']['200'] = {'description': 'Files already received', 'content': {'application/json': {'schema': obj({'already_received': {'type': 'boolean'}}, ['already_received'])}}}
+    paths['/transactions/import/jobs'] = {'post': submission}
+    paths['/transactions/import/jobs/{id}/cancel'] = {'parameters': [id_parameter], 'post': operation('Stop checks for a delayed import', ref('ImportJob'), method='post')}
+    paths['/transactions/import/summary'] = {'get': operation('Read household import badge and job progress', ref('ImportSummary'))}
+    paths['/transactions/import/review'] = {'get': operation('Read household pending transactions', ref('PendingReview'))}
+    paths['/transactions/import/review/save'] = {'post': operation('Save drafts, accept transactions, or delete pending rows atomically', ref('StatementImportResult'), ref('PendingSave'), 'post')}
     for route in ('/ocr/test', '/transactions/import/preview'):
         for code, description in [('415', 'Unsupported document format'), ('429', 'OCR Processor busy; retry manually'), ('502', 'OCR Processor failed or returned invalid output'), ('504', 'OCR Processor timed out')]:
             paths[route]['post']['responses'][code] = {'description': description, 'content': {'application/json': {'schema': ref('Error')}}}

@@ -63,6 +63,25 @@ for statement in RECORD_LIMIT_TRIGGERS:
     event.listen(Record.__table__, 'after_create', DDL(statement).execute_if(dialect='sqlite'))
 
 
+class PendingTransaction(db.Model):
+    __tablename__ = 'pending_transactions'
+    id = db.Column(db.String(36), primary_key=True, default=new_id)
+    submission_id = db.Column(db.String(36), nullable=False, index=True)
+    run_id = db.Column(db.String(36), nullable=False, index=True)
+    candidate_id = db.Column(db.String(100), nullable=False)
+    uploader_id = db.Column(db.String(36), nullable=False)
+    data = db.Column(db.JSON, nullable=False)
+    accepted = db.Column(db.Boolean, nullable=False, default=False)
+    revision = db.Column(db.Integer, nullable=False, default=1)
+    created_at = db.Column(db.String(32), nullable=False, default=utcnow)
+    updated_at = db.Column(db.String(32), nullable=False, default=utcnow)
+    __table_args__ = (db.UniqueConstraint('run_id', 'candidate_id', name='uq_pending_run_candidate'),)
+
+    def to_dict(self):
+        return {**self.data, 'id': self.id, 'revision': self.revision, 'selected': self.accepted,
+                'submission_id': self.submission_id, 'created_at': self.created_at}
+
+
 class Posting(db.Model):
     __tablename__ = "postings"
     id = db.Column(db.String(36), primary_key=True, default=new_id)

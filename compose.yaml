@@ -58,6 +58,36 @@ services:
       retries: 5
       start_period: 15s
 
+  import-collector:
+    image: *api-image
+    build: *api-build
+    command: [python, -m, whc.import_collector]
+    restart: unless-stopped
+    init: true
+    mem_limit: 512m
+    environment:
+      APP_VERSION: ${APP_VERSION}
+      DATABASE_URL: sqlite:////data/hoardcounter.db
+      MANAGED_MIGRATIONS: "true"
+      DATA_DIR: /data
+      UPLOAD_DIR: /uploads
+      BACKUP_DIR: /backups
+      SECRET_KEY: ${SECRET_KEY:?Set SECRET_KEY in .env}
+      HOUSEHOLD_TIMEZONE: ${HOUSEHOLD_TIMEZONE:-America/New_York}
+    volumes:
+      - ${WHC_DATA_ROOT:-/srv/hoard-counter}/data:/data
+      - ${WHC_DATA_ROOT:-/srv/hoard-counter}/uploads:/uploads
+      - ${WHC_DATA_ROOT:-/srv/hoard-counter}/backups:/backups
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    depends_on:
+      init:
+        condition: service_completed_successfully
+
   web:
     image: ${IMAGE_PREFIX:-hoard-counter}-web:${APP_VERSION:?Set an immutable APP_VERSION}
     mem_limit: 1g

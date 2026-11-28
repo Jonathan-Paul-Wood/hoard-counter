@@ -1,4 +1,5 @@
 FROM python:3.12-slim-bookworm
+LABEL org.hoard-counter.import-collector="true"
 ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1
 WORKDIR /app
 COPY backend/requirements.txt ./requirements.txt
